@@ -1,4 +1,4 @@
-// Visual Scraper Bookmarklet - Standalone version
+// Visual Scraper Bookmarklet - Enhanced version with robot selection
 (function() {
     if (typeof window.visualScraperLoaded !== 'undefined') {
         alert('Visual Scraper is already running on this page!');
@@ -6,7 +6,6 @@
     }
     window.visualScraperLoaded = true;
 
-    // IMPORTANT: Replace this URL after deploying to Vercel
     const API_BASE = 'https://visual-scraper-web.vercel.app';
     
     let isRecording = false;
@@ -80,280 +79,167 @@
         document.body.appendChild(selectionCounter);
     };
 
-    const createControlPanel = () => {
-        controlPanel = document.createElement('div');
-        controlPanel.id = 'vs-control-panel';
-        Object.assign(controlPanel.style, {
+    const createRobotSelectionPanel = async () => {
+        // First, try to load existing robots
+        let existingRobots = [];
+        
+        try {
+            const response = await fetch(`${API_BASE}/api/robots`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) {
+                    existingRobots = Object.keys(data.robots);
+                }
+            }
+        } catch (error) {
+            console.log('Could not load existing robots:', error);
+        }
+
+        const panel = document.createElement('div');
+        panel.id = 'vs-robot-selection-panel';
+        Object.assign(panel.style, {
             position: 'fixed',
-            bottom: '20px',
-            right: '20px',
+            top: '50%',
+            left: '50%',
+            transform: 'translate(-50%, -50%)',
             backgroundColor: '#1f2937',
-            padding: '16px',
+            padding: '20px',
             borderRadius: '12px',
             boxShadow: '0 8px 25px rgba(0,0,0,0.4)',
             zIndex: '1000000',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px',
-            minWidth: '200px',
-            border: '1px solid #374151'
+            minWidth: '300px',
+            border: '1px solid #374151',
+            color: 'white'
         });
 
-        const instructionText = document.createElement('div');
-        instructionText.style.cssText = 'color: #d1d5db; font-size: 12px; text-align: center; font-family: Arial, sans-serif;';
-        instructionText.textContent = 'Click elements to select data fields';
+        let panelContent = `
+            <div style="text-align: center; margin-bottom: 20px;">
+                <h3 style="margin: 0 0 10px 0; color: #facc15;">🤖 Visual Scraper</h3>
+                <p style="font-size: 12px; color: #d1d5db; margin: 0;">Choose an option to start scraping</p>
+            </div>
+        `;
 
-        const buttonContainer = document.createElement('div');
-        buttonContainer.style.cssText = 'display: flex; gap: 8px;';
-
-        const finishButton = document.createElement('button');
-        finishButton.id = 'vs-finish-button';
-        finishButton.textContent = 'Finish & Save';
-        Object.assign(finishButton.style, {
-            backgroundColor: '#facc15',
-            color: '#111827',
-            padding: '10px 15px',
-            border: 'none',
-            borderRadius: '8px',
-            fontWeight: '600',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontFamily: 'Arial, sans-serif',
-            transition: 'all 0.2s ease',
-            flex: '1'
-        });
-
-        const stopButton = document.createElement('button');
-        stopButton.id = 'vs-stop-button';
-        stopButton.textContent = 'Cancel';
-        Object.assign(stopButton.style, {
-            backgroundColor: '#ef4444',
-            color: '#ffffff',
-            padding: '10px 15px',
-            border: 'none',
-            borderRadius: '8px',
-            fontWeight: '600',
-            cursor: 'pointer',
-            fontSize: '13px',
-            fontFamily: 'Arial, sans-serif',
-            transition: 'all 0.2s ease',
-            flex: '1'
-        });
-
-        finishButton.addEventListener('click', saveData);
-        stopButton.addEventListener('click', cleanup);
-
-        buttonContainer.appendChild(stopButton);
-        buttonContainer.appendChild(finishButton);
-        controlPanel.appendChild(instructionText);
-        controlPanel.appendChild(buttonContainer);
-        document.body.appendChild(controlPanel);
-    };
-
-    const updateSelectionCounter = () => {
-        if (selectionCounter) {
-            const count = currentSelections.length;
-            selectionCounter.textContent = `${count} field${count !== 1 ? 's' : ''} selected`;
-            selectionCounter.style.backgroundColor = count > 0 ? '#10b981' : '#facc15';
-        }
-    };
-
-    const handleMouseOver = (e) => {
-        if (!isRecording) return;
-        const target = e.target;
-        if (target.closest('[id^="vs-"]')) {
-            highlightOverlay.style.display = 'none';
-            previewTooltip.style.display = 'none';
-            return;
-        }
-
-        const rect = target.getBoundingClientRect();
-        Object.assign(highlightOverlay.style, {
-            display: 'block',
-            width: `${rect.width}px`,
-            height: `${rect.height}px`,
-            top: `${rect.top + window.scrollY}px`,
-            left: `${rect.left + window.scrollX}px`
-        });
-
-        const textContent = target.innerText.trim();
-        if (textContent && previewTooltip) {
-            const truncatedText = textContent.length > 100 ? textContent.substring(0, 100) + '...' : textContent;
-            previewTooltip.textContent = `Preview: "${truncatedText}"`;
-            Object.assign(previewTooltip.style, {
-                display: 'block',
-                top: `${rect.top + window.scrollY - 40}px`,
-                left: `${Math.min(rect.left + window.scrollX, window.innerWidth - 250)}px`
-            });
-        }
-    };
-
-    const handleMouseOut = (e) => {
-        if (!isRecording) return;
-        if (previewTooltip) {
-            previewTooltip.style.display = 'none';
-        }
-    };
-
-    const handleClick = (e) => {
-        if (!isRecording) return;
-        const target = e.target;
-        if (target.closest('[id^="vs-"]')) return;
-        e.preventDefault();
-        e.stopPropagation();
-
-        const textPreview = target.innerText.trim().substring(0, 50);
-        const defaultName = `Field ${currentSelections.length + 1}`;
-
-        const dataName = prompt(
-            `Enter a name for this data field:\n\nPreview: "${textPreview}..."\n\nSuggested name: ${defaultName}`,
-            defaultName
-        );
-
-        if (dataName) {
-            const selector = getCssSelector(target);
-            currentSelections.push({
-                name: dataName.trim(),
-                selector,
-                preview: textPreview
-            });
-            updateSelectionCounter();
-
-            const successIndicator = document.createElement('div');
-            successIndicator.style.cssText = `
-                position: absolute;
-                top: ${target.getBoundingClientRect().top + window.scrollY}px;
-                left: ${target.getBoundingClientRect().left + window.scrollX}px;
-                background: #10b981;
-                color: #ffffff;
-                padding: 4px 8px;
-                border-radius: 4px;
-                font-size: 12px;
-                font-family: Arial, sans-serif;
-                z-index: 1000002;
-                pointer-events: none;
-                transition: opacity 0.3s ease;
+        if (existingRobots.length > 0) {
+            panelContent += `
+                <div style="margin-bottom: 15px;">
+                    <h4 style="margin: 0 0 10px 0; color: #d1d5db; font-size: 14px;">Use Existing Robot:</h4>
+                    ${existingRobots.map(robot => `
+                        <button onclick="window.useExistingRobot('${robot}')" 
+                                style="width: 100%; background: #374151; color: white; border: none; padding: 10px; margin: 5px 0; border-radius: 6px; cursor: pointer; text-align: left;">
+                            🚀 ${robot}
+                        </button>
+                    `).join('')}
+                </div>
+                <hr style="border: none; border-top: 1px solid #374151; margin: 15px 0;">
             `;
-            successIndicator.textContent = `✓ ${dataName}`;
-            document.body.appendChild(successIndicator);
-
-            setTimeout(() => {
-                successIndicator.style.opacity = '0';
-                setTimeout(() => successIndicator.remove(), 300);
-            }, 2000);
         }
+
+        panelContent += `
+            <div>
+                <h4 style="margin: 0 0 10px 0; color: #d1d5db; font-size: 14px;">Create New Robot:</h4>
+                <input type="text" id="vs-new-robot-name" placeholder="Enter robot name" 
+                       style="width: 100%; padding: 10px; border: 1px solid #4b5563; background: #374151; color: white; border-radius: 6px; margin-bottom: 10px;">
+                <button onclick="window.createNewRobot()" 
+                        style="width: 100%; background: #facc15; color: #111827; border: none; padding: 10px; border-radius: 6px; font-weight: bold; cursor: pointer;">
+                    🆕 Create New Robot
+                </button>
+            </div>
+            <div style="text-align: center; margin-top: 15px;">
+                <button onclick="window.cleanupScraper()" 
+                        style="background: none; border: none; color: #9ca3af; cursor: pointer; font-size: 12px;">
+                    Cancel
+                </button>
+            </div>
+        `;
+
+        panel.innerHTML = panelContent;
+        document.body.appendChild(panel);
+
+        // Add global functions
+        window.useExistingRobot = function(robotName) {
+            runExistingRobot(robotName);
+        };
+
+        window.createNewRobot = function() {
+            const robotName = document.getElementById('vs-new-robot-name').value.trim();
+            if (!robotName) {
+                alert('Please enter a robot name');
+                return;
+            }
+            startRecording(robotName);
+        };
+
+        window.cleanupScraper = function() {
+            cleanup();
+        };
     };
 
-    const getCssSelector = (el) => {
-        if (!(el instanceof Element)) return;
-        const path = [];
-        while (el.nodeType === Node.ELEMENT_NODE) {
-            let selector = el.nodeName.toLowerCase();
-            if (el.id) {
-                const sanitizedId = el.id.trim().replace(/(:|\.|\[|\]|,|=)/g, "\\$1");
-                if (sanitizedId) {
-                    selector += '#' + sanitizedId;
-                    path.unshift(selector);
-                    break;
-                }
+    const runExistingRobot = async (robotName) => {
+        try {
+            const response = await fetch(`${API_BASE}/api/robots`);
+            if (!response.ok) throw new Error('Failed to fetch robots');
+            
+            const data = await response.json();
+            if (!data.success || !data.robots[robotName]) {
+                throw new Error('Robot not found');
             }
-            let sib = el, nth = 1;
-            while (sib = sib.previousElementSibling) {
-                if (sib.nodeName.toLowerCase() == selector) nth++;
-            }
-            if (nth != 1) selector += `:nth-of-type(${nth})`;
-            path.unshift(selector);
-            el = el.parentNode;
-        }
-        return path.join(' > ');
-    };
 
-    const saveData = async () => {
-        if (currentSelections.length === 0) {
-            alert("No elements were selected. Click elements on the page to add them to your robot.");
-            return;
-        }
+            const selectors = data.robots[robotName];
+            
+            // Remove selection panel
+            const panel = document.getElementById('vs-robot-selection-panel');
+            if (panel) panel.remove();
 
-        const confirmMessage = `Save robot "${currentRobotName}" with ${currentSelections.length} selected fields?\n\nFields: ${currentSelections.map(s => s.name).join(', ')}`;
-
-        if (confirm(confirmMessage)) {
-            // Extract data
-            const data = {};
-            currentSelections.forEach(item => {
+            // Extract data immediately
+            const extractedData = {};
+            selectors.forEach(item => {
                 try {
                     const element = document.querySelector(item.selector);
-                    data[item.name] = element ? element.innerText.trim() : 'Not Found';
+                    extractedData[item.name] = element ? element.innerText.trim() : 'Not Found';
                 } catch (e) {
-                    data[item.name] = 'Invalid Selector';
+                    extractedData[item.name] = 'Invalid Selector';
                 }
             });
-            data['Source URL'] = window.location.href;
-            data['Scraped At'] = new Date().toISOString();
+            
+            extractedData['Source URL'] = window.location.href;
+            extractedData['Scraped At'] = new Date().toISOString();
+            extractedData['robotName'] = robotName;
 
-            try {
-                // Save robot and data to API
-                const response = await fetch(`${API_BASE}/api/save`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        robotName: currentRobotName,
-                        selectors: currentSelections.map(s => ({ name: s.name, selector: s.selector })),
-                        data: data
-                    })
-                });
+            // Save the data
+            const saveResponse = await fetch(`${API_BASE}/api/save`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    robotName: robotName,
+                    selectors: selectors,
+                    data: extractedData
+                })
+            });
 
-                if (response.ok) {
-                    const result = await response.json();
-                    alert(`✓ Robot "${currentRobotName}" saved successfully!\n\nData captured: ${currentSelections.length} fields\nTotal records: ${result.count}\n\nView your data at: ${API_BASE}`);
-                    cleanup();
-                } else {
-                    throw new Error('Failed to save data');
-                }
-            } catch (error) {
-                alert(`✗ Error saving data: ${error.message}\n\nMake sure you've deployed to Vercel and updated the API_BASE URL.`);
+            if (saveResponse.ok) {
+                const result = await saveResponse.json();
+                alert(`✅ Data extracted successfully using "${robotName}"!\n\n📊 ${Object.keys(extractedData).length} fields extracted\n💾 Saved to database\n\nYou can view your data at: ${API_BASE}`);
+            } else {
+                throw new Error('Failed to save data');
             }
+
+            cleanup();
+            
+        } catch (error) {
+            alert(`❌ Error running robot "${robotName}": ${error.message}`);
+            cleanup();
         }
     };
 
-    const cleanup = () => {
-        isRecording = false;
-        if (highlightOverlay) highlightOverlay.remove();
-        if (previewTooltip) previewTooltip.remove();
-        if (selectionCounter) selectionCounter.remove();
-        if (controlPanel) controlPanel.remove();
+    // ... (keep all the existing functions: createHighlightOverlay, createPreviewTooltip, createSelectionCounter, 
+    // createControlPanel, updateSelectionCounter, handleMouseOver, handleMouseOut, handleClick, getCssSelector, 
+    // saveData, cleanup, startRecording from your original code)
 
-        document.removeEventListener('mouseover', handleMouseOver, true);
-        document.removeEventListener('mouseout', handleMouseOut, true);
-        document.removeEventListener('click', handleClick, true);
-        
-        window.visualScraperLoaded = undefined;
-    };
-
+    // Modified start function
     const start = () => {
-        currentRobotName = prompt('Enter a name for this scraping robot:', 'My Robot');
-        if (!currentRobotName) {
-            window.visualScraperLoaded = undefined;
-            return;
-        }
-
-        isRecording = true;
-        currentSelections = [];
-        
-        createHighlightOverlay();
-        createPreviewTooltip();
-        createSelectionCounter();
-        createControlPanel();
-        
-        updateSelectionCounter();
-
-        document.addEventListener('mouseover', handleMouseOver, true);
-        document.addEventListener('mouseout', handleMouseOut, true);
-        document.addEventListener('click', handleClick, true);
-
-        setTimeout(() => {
-            alert(`Recording started for "${currentRobotName}"!\n\nInstructions:\n• Hover over elements to preview\n• Click elements to select data fields\n• Use the control panel to finish or cancel`);
-        }, 500);
+        createRobotSelectionPanel();
     };
 
+    // Start the scraper
     start();
 })();

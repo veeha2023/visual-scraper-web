@@ -9,36 +9,63 @@ await redisClient.connect();
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  if (req.method !== 'GET') {
-    return res.status(405).json({ success: false, error: 'Method not allowed' });
-  }
-
   try {
-    let robots = await redisClient.get('robots');
-    if (!robots) {
-      robots = {};
-      await redisClient.set('robots', JSON.stringify(robots));
+    if (req.method === 'GET') {
+      let robots = await redisClient.get('robots');
+      if (!robots) {
+        robots = {};
+        await redisClient.set('robots', JSON.stringify(robots));
+      } else {
+        robots = JSON.parse(robots);
+      }
+      
+      res.status(200).json({ 
+        success: true,
+        count: Object.keys(robots).length,
+        robots: robots
+      });
+    } else if (req.method === 'DELETE') {
+      const { robotName } = req.body;
+      
+      if (!robotName) {
+        return res.status(400).json({ success: false, error: 'Robot name required' });
+      }
+
+      let robots = await redisClient.get('robots');
+      if (!robots) {
+        robots = {};
+      } else {
+        robots = JSON.parse(robots);
+      }
+      
+      if (robots[robotName]) {
+        delete robots[robotName];
+        await redisClient.set('robots', JSON.stringify(robots));
+        res.status(200).json({ 
+          success: true,
+          message: `Robot "${robotName}" deleted successfully`
+        });
+      } else {
+        res.status(404).json({ 
+          success: false,
+          error: 'Robot not found'
+        });
+      }
     } else {
-      robots = JSON.parse(robots);
+      res.status(405).json({ success: false, error: 'Method not allowed' });
     }
-    
-    res.status(200).json({ 
-      success: true,
-      count: Object.keys(robots).length,
-      robots: robots
-    });
   } catch (error) {
-    console.error('Robots fetch error:', error);
+    console.error('Robots API error:', error);
     res.status(500).json({ 
       success: false, 
-      error: error.message 
+      error: error.message
     });
   }
 }
