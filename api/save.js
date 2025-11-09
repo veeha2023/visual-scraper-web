@@ -4,7 +4,6 @@ const redisClient = createClient({
   url: process.env.REDIS_URL
 });
 
-// Connect to Redis
 await redisClient.connect();
 
 export default async function handler(req, res) {
@@ -21,46 +20,59 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { robotName, selectors, data } = req.body;
+    const { robotName, selectors, data, workspace = 'general' } = req.body;
 
-    if (!robotName || !selectors || !data) {
+    if (!robotName) {
       return res.status(400).json({ 
         success: false, 
-        error: 'Missing required fields' 
+        error: 'Robot name is required' 
       });
     }
 
-    let robots = await redisClient.get('robots');
-    if (!robots) {
-      robots = {};
-    } else {
-      robots = JSON.parse(robots);
+    // Save robot (shared across all workspaces)
+    if (selectors) {
+      let robots = await redisClient.get('robots');
+      if (!robots) {
+        robots = {};
+      } else {
+        robots = JSON.parse(robots);
+      }
+      
+      robots[robotName] = selectors;
+      await redisClient.set('robots', JSON.stringify(robots));
     }
-    
-    robots[robotName] = selectors;
-    await redisClient.set('robots', JSON.stringify(robots));
 
-    let scrapedData = await redisClient.get('scraped_data');
-    if (!scrapedData) {
-      scrapedData = [];
-    } else {
-      scrapedData = JSON.parse(scrapedData);
+    // Save data to specific workspace
+    if (data) {
+      let workspaceData = await redisClient.get('workspace_data');
+      if (!workspaceData) {
+        workspaceData = {};
+      } else {
+        workspaceData = JSON.parse(workspaceData);
+      }
+
+      if (!workspaceData[workspace]) {
+        workspaceData[workspace] = [];
+      }
+
+      const newEntry = {
+        ...data,
+        robotName,
+        workspace: workspace,
+        timestamp: new Date().toISOString()
+      };
+      
+      workspaceData[workspace].push(newEntry);
+      await redisClient.set('workspace_data', JSON.stringify(workspaceData));
     }
-    
-    const newEntry = {
-      ...data,
-      robotName,
-      timestamp: new Date().toISOString()
-    };
-    scrapedData.push(newEntry);
-    await redisClient.set('scraped_data', JSON.stringify(scrapedData));
 
     res.status(200).json({ 
       success: true, 
       message: 'Data saved successfully',
-      count: scrapedData.length,
+      workspace: workspace,
       robotName: robotName
     });
+
   } catch (error) {
     console.error('Save error:', error);
     res.status(500).json({ 

@@ -4,7 +4,6 @@ const redisClient = createClient({
   url: process.env.REDIS_URL
 });
 
-// Connect to Redis
 await redisClient.connect();
 
 export default async function handler(req, res) {
@@ -17,38 +16,52 @@ export default async function handler(req, res) {
   }
 
   try {
+    const { workspace = 'general' } = req.query;
+
     if (req.method === 'GET') {
-      let scrapedData = await redisClient.get('scraped_data');
-      if (!scrapedData) {
-        scrapedData = [];
-        await redisClient.set('scraped_data', JSON.stringify(scrapedData));
+      let workspaceData = await redisClient.get('workspace_data');
+      if (!workspaceData) {
+        workspaceData = {};
+        await redisClient.set('workspace_data', JSON.stringify(workspaceData));
       } else {
-        scrapedData = JSON.parse(scrapedData);
+        workspaceData = JSON.parse(workspaceData);
       }
+
+      const data = workspaceData[workspace] || [];
       
       res.status(200).json({ 
         success: true,
-        count: Array.isArray(scrapedData) ? scrapedData.length : 0,
-        data: scrapedData,
-        lastUpdated: Array.isArray(scrapedData) && scrapedData.length > 0 
-          ? scrapedData[scrapedData.length - 1].timestamp 
-          : null
+        count: data.length,
+        data: data,
+        workspace: workspace,
+        lastUpdated: data.length > 0 ? data[data.length - 1].timestamp : null
       });
+
     } else if (req.method === 'DELETE') {
-      await redisClient.set('scraped_data', JSON.stringify([]));
+      let workspaceData = await redisClient.get('workspace_data');
+      if (!workspaceData) {
+        workspaceData = {};
+      } else {
+        workspaceData = JSON.parse(workspaceData);
+      }
+
+      workspaceData[workspace] = [];
+      await redisClient.set('workspace_data', JSON.stringify(workspaceData));
+
       res.status(200).json({ 
         success: true,
-        message: 'All data cleared'
+        message: `Data cleared from workspace "${workspace}"`,
+        workspace: workspace
       });
+
     } else {
       res.status(405).json({ success: false, error: 'Method not allowed' });
     }
   } catch (error) {
-    console.error('Data fetch error:', error);
+    console.error('Data API error:', error);
     res.status(500).json({ 
       success: false, 
-      error: error.message,
-      details: 'Redis connection error'
+      error: error.message
     });
   }
 }
