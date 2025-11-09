@@ -9,7 +9,7 @@ await redisClient.connect();
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') {
@@ -31,7 +31,68 @@ export default async function handler(req, res) {
         count: Object.keys(robots).length,
         robots: robots
       });
-    } else if (req.method === 'DELETE') {
+    } 
+    else if (req.method === 'POST') {
+      const { robotName, selectors } = req.body;
+      
+      if (!robotName || !selectors) {
+        return res.status(400).json({ success: false, error: 'Robot name and selectors required' });
+      }
+
+      let robots = await redisClient.get('robots');
+      if (!robots) {
+        robots = {};
+      } else {
+        robots = JSON.parse(robots);
+      }
+      
+      // Check if robot already exists
+      if (robots[robotName]) {
+        return res.status(400).json({ 
+          success: false, 
+          error: 'Robot with this name already exists' 
+        });
+      }
+
+      robots[robotName] = selectors;
+      await redisClient.set('robots', JSON.stringify(robots));
+      
+      res.status(200).json({ 
+        success: true,
+        message: `Robot "${robotName}" created successfully`,
+        robotName: robotName
+      });
+    }
+    else if (req.method === 'PUT') {
+      const { robotName, selectors } = req.body;
+      
+      if (!robotName || !selectors) {
+        return res.status(400).json({ success: false, error: 'Robot name and selectors required' });
+      }
+
+      let robots = await redisClient.get('robots');
+      if (!robots) {
+        robots = {};
+      } else {
+        robots = JSON.parse(robots);
+      }
+      
+      if (!robots[robotName]) {
+        return res.status(404).json({ 
+          success: false, 
+          error: 'Robot not found' 
+        });
+      }
+
+      robots[robotName] = selectors;
+      await redisClient.set('robots', JSON.stringify(robots));
+
+      res.status(200).json({ 
+        success: true,
+        message: `Robot "${robotName}" updated successfully`
+      });
+    }
+    else if (req.method === 'DELETE') {
       const { robotName } = req.body;
       
       if (!robotName) {
