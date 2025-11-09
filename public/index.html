@@ -155,7 +155,7 @@
 
         <div class="bookmarklet-section">
             <h3 style="margin-bottom: 15px;">📌 Drag this to your bookmarks bar:</h3>
-            <a href="javascript:(function(){var s=document.createElement('script');s.src=location.protocol+'//'+location.host+'/scraper.js';document.body.appendChild(s);})();" 
+            <a href="javascript:(function(){var s=document.createElement('script');s.src='https://visual-scraper-web-veer-voras-projects.vercel.app/scraper.js';document.body.appendChild(s);})();" 
                class="bookmarklet-button"
                onclick="alert('Drag this button to your bookmarks bar instead of clicking it!'); return false;">
                 🕷️ Visual Scraper
@@ -212,7 +212,7 @@
 
     <script>
         // Set API URLs dynamically
-        const baseUrl = location.protocol + '//' + location.host;
+         const baseUrl = 'https://visual-scraper-web-veer-voras-projects.vercel.app';
         document.getElementById('api-data-url').textContent = baseUrl + '/api/data';
         document.getElementById('api-robots-url').textContent = baseUrl + '/api/robots';
 

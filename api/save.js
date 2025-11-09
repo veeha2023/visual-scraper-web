@@ -1,8 +1,6 @@
-// Vercel Serverless Function - Save robots and scraped data
 import { kv } from '@vercel/kv';
 
 export default async function handler(req, res) {
-    // Enable CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -12,23 +10,24 @@ export default async function handler(req, res) {
     }
 
     if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method not allowed' });
+        return res.status(405).json({ success: false, error: 'Method not allowed' });
     }
 
     try {
         const { robotName, selectors, data } = req.body;
 
         if (!robotName || !selectors || !data) {
-            return res.status(400).json({ error: 'Missing required fields' });
+            return res.status(400).json({ 
+                success: false, 
+                error: 'Missing required fields' 
+            });
         }
 
-        // Save or update robot configuration
-        const robots = await kv.get('robots') || {};
+        let robots = await kv.get('robots') || {};
         robots[robotName] = selectors;
         await kv.set('robots', robots);
 
-        // Save scraped data
-        const scrapedData = await kv.get('scraped_data') || [];
+        let scrapedData = await kv.get('scraped_data') || [];
         const newEntry = {
             ...data,
             robotName,
@@ -45,6 +44,9 @@ export default async function handler(req, res) {
         });
     } catch (error) {
         console.error('Save error:', error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ 
+            success: false, 
+            error: error.message
+        });
     }
 }

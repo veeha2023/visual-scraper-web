@@ -1,8 +1,6 @@
-// Vercel Serverless Function - Get all scraped data (for n8n)
 import { kv } from '@vercel/kv';
 
 export default async function handler(req, res) {
-    // Enable CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -13,27 +11,35 @@ export default async function handler(req, res) {
 
     try {
         if (req.method === 'GET') {
-            // Get all scraped data
-            const scrapedData = await kv.get('scraped_data') || [];
+            let scrapedData = await kv.get('scraped_data');
+            if (!scrapedData) {
+                scrapedData = [];
+                await kv.set('scraped_data', scrapedData);
+            }
             
             res.status(200).json({ 
                 success: true,
-                count: scrapedData.length,
+                count: Array.isArray(scrapedData) ? scrapedData.length : 0,
                 data: scrapedData,
-                lastUpdated: scrapedData.length > 0 ? scrapedData[scrapedData.length - 1].timestamp : null
+                lastUpdated: Array.isArray(scrapedData) && scrapedData.length > 0 
+                    ? scrapedData[scrapedData.length - 1].timestamp 
+                    : null
             });
         } else if (req.method === 'DELETE') {
-            // Clear all data (optional - for dashboard)
             await kv.set('scraped_data', []);
             res.status(200).json({ 
                 success: true,
                 message: 'All data cleared'
             });
         } else {
-            res.status(405).json({ error: 'Method not allowed' });
+            res.status(405).json({ success: false, error: 'Method not allowed' });
         }
     } catch (error) {
         console.error('Data fetch error:', error);
-        res.status(500).json({ error: error.message });
+        res.status(500).json({ 
+            success: false, 
+            error: error.message,
+            details: 'Redis/KV connection error'
+        });
     }
 }
