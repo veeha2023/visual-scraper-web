@@ -7,7 +7,7 @@
     window.visualScraperLoaded = true;
 
     // IMPORTANT: Replace this URL after deploying to Vercel
-    const API_BASE = 'https://YOUR-VERCEL-URL.vercel.app';
+    const API_BASE = 'https://visual-scraper-50xz51kk3-veer-voras-projects.vercel.app';
     
     let isRecording = false;
     let currentRobotName = '';
