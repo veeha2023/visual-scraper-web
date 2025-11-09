@@ -106,8 +106,16 @@
             background: #e74c3c;
         }
         
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
         .btn-success {
             background: #27ae60;
+        }
+        
+        .btn-success:hover {
+            background: #219a52;
         }
         
         .bookmarklet-section {
@@ -130,6 +138,18 @@
             font-size: 18px;
             margin: 15px 0;
             cursor: move;
+            transition: transform 0.2s;
+        }
+        
+        .bookmarklet-button:hover {
+            transform: scale(1.05);
+        }
+        
+        .instruction {
+            color: #555;
+            font-size: 14px;
+            margin-top: 10px;
+            line-height: 1.6;
         }
         
         .stats {
@@ -151,6 +171,49 @@
             font-size: 2em;
             font-weight: bold;
             color: #667eea;
+        }
+        
+        .api-endpoint {
+            background: #f1f3f5;
+            padding: 12px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            color: #333;
+            word-break: break-all;
+            margin: 10px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .loading {
+            text-align: center;
+            color: #666;
+            padding: 20px;
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 30px;
+            padding-top: 20px;
+            border-top: 1px solid #e9ecef;
+            color: #999;
+            font-size: 14px;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+            
+            .stats {
+                grid-template-columns: 1fr;
+            }
+            
+            .container {
+                padding: 20px;
+            }
         }
     </style>
 </head>
@@ -223,15 +286,25 @@
             
             <strong style="color: #555;">Get All Scraped Data:</strong>
             <div class="api-endpoint">
-                GET <span id="api-data-url"></span>
+                <span id="api-data-url"></span>
                 <button class="btn" onclick="copyToClipboard('api-data-url')">Copy</button>
             </div>
             
             <strong style="color: #555;">Get All Robots:</strong>
             <div class="api-endpoint">
-                GET <span id="api-robots-url"></span>
+                <span id="api-robots-url"></span>
                 <button class="btn" onclick="copyToClipboard('api-robots-url')">Copy</button>
             </div>
+
+            <strong style="color: #555;">Test API Connection:</strong>
+            <div style="margin-top: 10px;">
+                <button class="btn" onclick="testAPI()">Test API Connection</button>
+                <div id="test-result" style="margin-top: 10px; padding: 10px; border-radius: 6px; display: none;"></div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Built for seamless web scraping and automation</p>
         </div>
     </div>
 
@@ -259,19 +332,20 @@
                     const dataList = document.getElementById('data-list');
                     
                     if (data.count === 0) {
-                        dataList.innerHTML = '<div class="data-item">No scraped data yet</div>';
+                        dataList.innerHTML = '<div class="data-item">No scraped data yet. Use the bookmarklet to start scraping!</div>';
                     } else {
                         dataList.innerHTML = data.data.slice(0, 10).map(item => `
                             <div class="data-item">
                                 <strong>${item.robotName || 'Unknown Robot'}</strong><br>
                                 <small>${new Date(item.timestamp).toLocaleString()}</small><br>
                                 <span style="color: #666;">${Object.keys(item).length} fields</span>
+                                ${item['Source URL'] ? `<br><a href="${item['Source URL']}" target="_blank" style="color: #667eea; font-size: 12px;">View Source</a>` : ''}
                             </div>
                         `).join('');
                     }
                 }
             } catch (error) {
-                document.getElementById('data-list').innerHTML = '<div class="data-item">Error loading data</div>';
+                document.getElementById('data-list').innerHTML = '<div class="data-item">Error loading data: ' + error.message + '</div>';
             }
         }
 
@@ -285,16 +359,16 @@
                     const robotsList = document.getElementById('robots-list');
                     
                     if (data.count === 0) {
-                        robotsList.innerHTML = '<div class="robot-item">No robots saved yet</div>';
+                        robotsList.innerHTML = '<div class="robot-item">No robots saved yet. Create your first robot using the bookmarklet!</div>';
                     } else {
                         robotsList.innerHTML = Object.entries(data.robots).map(([name, selectors]) => `
                             <div class="robot-item">
                                 <div>
                                     <strong>${name}</strong><br>
-                                    <small>${selectors.length} fields</small>
+                                    <small>${selectors.length} fields configured</small>
                                 </div>
                                 <div>
-                                    <button class="btn" onclick="runRobot('${name}')">Run</button>
+                                    <button class="btn btn-success" onclick="runRobot('${name}')">Run</button>
                                     <button class="btn btn-danger" onclick="deleteRobot('${name}')">Delete</button>
                                 </div>
                             </div>
@@ -302,7 +376,7 @@
                     }
                 }
             } catch (error) {
-                document.getElementById('robots-list').innerHTML = '<div class="robot-item">Error loading robots</div>';
+                document.getElementById('robots-list').innerHTML = '<div class="robot-item">Error loading robots: ' + error.message + '</div>';
             }
         }
 
@@ -318,8 +392,70 @@
             }
         }
 
-        function exportData(format) {
-            window.open(baseUrl + `/api/data?format=${format}`, '_blank');
+        async function exportData(format) {
+            try {
+                const response = await fetch(baseUrl + '/api/data');
+                const data = await response.json();
+                
+                if (!data.success || data.count === 0) {
+                    alert('No data to export!');
+                    return;
+                }
+
+                if (format === 'json') {
+                    // Download as JSON
+                    const blob = new Blob([JSON.stringify(data.data, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `scraped-data-${new Date().toISOString().split('T')[0]}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                } else if (format === 'csv') {
+                    // Convert to CSV and download
+                    const csv = convertToCSV(data.data);
+                    const blob = new Blob([csv], { type: 'text/csv' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `scraped-data-${new Date().toISOString().split('T')[0]}.csv`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }
+            } catch (error) {
+                alert('Error exporting data: ' + error.message);
+            }
+        }
+
+        function convertToCSV(data) {
+            if (data.length === 0) return '';
+            
+            // Get all unique headers
+            const headers = new Set();
+            data.forEach(row => {
+                Object.keys(row).forEach(key => headers.add(key));
+            });
+            
+            const headerArray = Array.from(headers);
+            
+            // Create CSV content
+            let csvContent = headerArray.join(',') + '\n';
+            
+            data.forEach(row => {
+                const values = headerArray.map(header => {
+                    let value = row[header] || '';
+                    // Escape quotes and wrap in quotes
+                    value = String(value).replace(/"/g, '""');
+                    return `"${value}"`;
+                });
+                csvContent += values.join(',') + '\n';
+            });
+            
+            return csvContent;
         }
 
         async function clearAllData() {
@@ -339,26 +475,87 @@
         }
 
         function runRobot(robotName) {
-            alert(`To use robot "${robotName}":\n\n1. Go to any website\n2. Click the Visual Scraper bookmarklet\n3. The robot will be available in the extension popup`);
+            alert(`To use robot "${robotName}":\n\n1. Go to any website you want to scrape\n2. Click the Visual Scraper bookmarklet\n3. Select "${robotName}" from the existing robots list\n4. The robot will automatically extract data from the current page!`);
         }
 
         async function deleteRobot(robotName) {
-            if (confirm(`Delete robot "${robotName}"? This cannot be undone.`)) {
-                // Note: You'll need to add a DELETE endpoint for robots
-                alert('Robot deletion feature coming soon!');
-                // For now, robots are managed through the Chrome extension
+            if (confirm(`Are you sure you want to delete robot "${robotName}"? This cannot be undone.`)) {
+                try {
+                    const response = await fetch(baseUrl + '/api/robots', {
+                        method: 'DELETE',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ robotName: robotName })
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        alert(`Robot "${robotName}" deleted successfully!`);
+                        loadRobots();
+                    } else {
+                        alert('Error deleting robot: ' + data.error);
+                    }
+                } catch (error) {
+                    alert('Error deleting robot: ' + error.message);
+                }
             }
         }
 
         function refreshRobots() {
             loadRobots();
+            loadScrapedData();
+            checkAPIStatus();
         }
 
         function copyToClipboard(elementId) {
             const text = document.getElementById(elementId).textContent;
             navigator.clipboard.writeText(text).then(() => {
                 alert('Copied to clipboard!');
+            }).catch(() => {
+                // Fallback for older browsers
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                alert('Copied to clipboard!');
             });
+        }
+
+        async function testAPI() {
+            const resultDiv = document.getElementById('test-result');
+            resultDiv.style.display = 'block';
+            resultDiv.style.background = '#fff3cd';
+            resultDiv.style.color = '#856404';
+            resultDiv.textContent = '⏳ Testing API connection...';
+
+            try {
+                const response = await fetch(baseUrl + '/api/data');
+                const data = await response.json();
+                
+                if (data.success) {
+                    resultDiv.style.background = '#d4edda';
+                    resultDiv.style.color = '#155724';
+                    resultDiv.innerHTML = `
+                        <strong>✓ API is working!</strong><br>
+                        Found ${data.count} scraped records<br>
+                        Last updated: ${data.lastUpdated ? new Date(data.lastUpdated).toLocaleString() : 'Never'}
+                    `;
+                } else {
+                    throw new Error('API returned unsuccessful response');
+                }
+            } catch (error) {
+                resultDiv.style.background = '#f8d7da';
+                resultDiv.style.color = '#721c24';
+                resultDiv.innerHTML = `
+                    <strong>✗ API Error</strong><br>
+                    ${error.message}<br>
+                    Make sure you've set up Redis KV storage and deployed all API endpoints.
+                `;
+            }
         }
     </script>
 </body>
