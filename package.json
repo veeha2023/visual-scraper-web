@@ -1,0 +1,12 @@
+{
+  "name": "visual-scraper-web",
+  "version": "1.0.0",
+  "description": "Web-based visual scraper with n8n integration",
+  "type": "module",
+  "dependencies": {
+    "@vercel/kv": "^1.0.1"
+  },
+  "engines": {
+    "node": ">=18.x"
+  }
+}
