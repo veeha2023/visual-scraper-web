@@ -391,26 +391,53 @@
             
             <strong style="color: #555;">Get Workspace Data:</strong>
             <div class="api-endpoint">
-                <span id="api-data-url"></span>
+                <span id="api-data-url">Loading...</span>
                 <button class="btn" onclick="copyToClipboard('api-data-url')">Copy</button>
             </div>
             
             <strong style="color: #555;">Get All Robots:</strong>
             <div class="api-endpoint">
-                <span id="api-robots-url"></span>
+                <span id="api-robots-url">Loading...</span>
                 <button class="btn" onclick="copyToClipboard('api-robots-url')">Copy</button>
             </div>
 
             <strong style="color: #555;">Create Workspace (for n8n):</strong>
             <div class="api-endpoint">
-                <span id="api-workspace-url"></span>
+                <span id="api-workspace-url">Loading...</span>
                 <button class="btn" onclick="copyToClipboard('api-workspace-url')">Copy</button>
+            </div>
+
+            <strong style="color: #555;">Bulk URL Processing:</strong>
+            <div class="api-endpoint">
+                <span id="api-bulk-url">Loading...</span>
+                <button class="btn" onclick="copyToClipboard('api-bulk-url')">Copy</button>
+            </div>
+
+            <strong style="color: #555;">Webhook Integration:</strong>
+            <div class="api-endpoint">
+                <span id="api-webhook-url">Loading...</span>
+                <button class="btn" onclick="copyToClipboard('api-webhook-url')">Copy</button>
             </div>
 
             <strong style="color: #555;">Test API Connection:</strong>
             <div style="margin-top: 10px;">
                 <button class="btn" onclick="testAPI()">Test API Connection</button>
                 <div id="test-result" style="margin-top: 10px; padding: 10px; border-radius: 6px; display: none;"></div>
+            </div>
+
+            <!-- n8n Integration Instructions -->
+            <div style="margin-top: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; border-left: 4px solid #667eea;">
+                <h4 style="margin-bottom: 10px; color: #333;">🎯 n8n Integration Guide</h4>
+                <p style="font-size: 14px; color: #666; margin-bottom: 10px;">All endpoints work with n8n! Use HTTP Request nodes with:</p>
+                <ul style="font-size: 14px; color: #666; margin-left: 20px;">
+                    <li><strong>Method:</strong> POST for creating data, GET for retrieving</li>
+                    <li><strong>Headers:</strong> <code>Content-Type: application/json</code></li>
+                    <li><strong>Authentication:</strong> None required (public API)</li>
+                    <li><strong>Workspace Parameter:</strong> Add <code>?workspace=client-name</code> to URLs</li>
+                </ul>
+                <p style="font-size: 14px; color: #666; margin-top: 10px;">
+                    <strong>Example n8n workflow:</strong> Webhook → Process URLs → POST to /api/bulk → Save results
+                </p>
             </div>
         </div>
     </div>
@@ -441,15 +468,20 @@
         let workspaces = [{ id: 'general', name: 'General (Testing)' }];
         
         // Set API URLs
-        document.getElementById('api-data-url').textContent = baseUrl + '/api/data?workspace=' + currentWorkspace;
-        document.getElementById('api-robots-url').textContent = baseUrl + '/api/robots';
-        document.getElementById('api-workspace-url').textContent = baseUrl + '/api/workspaces';
+        function setAPIUrls() {
+            document.getElementById('api-data-url').textContent = baseUrl + '/api/data?workspace=' + currentWorkspace;
+            document.getElementById('api-robots-url').textContent = baseUrl + '/api/robots';
+            document.getElementById('api-workspace-url').textContent = baseUrl + '/api/workspaces';
+            document.getElementById('api-bulk-url').textContent = baseUrl + '/api/bulk';
+            document.getElementById('api-webhook-url').textContent = baseUrl + '/api/webhooks';
+        }
 
         // Load everything on page load
         document.addEventListener('DOMContentLoaded', function() {
             loadWorkspaces();
             loadScrapedData();
             loadRobots();
+            setAPIUrls();
         });
 
         // Workspace Management
@@ -489,7 +521,7 @@
             currentWorkspace = select.value;
             
             // Update API URL display
-            document.getElementById('api-data-url').textContent = baseUrl + '/api/data?workspace=' + currentWorkspace;
+            setAPIUrls();
             
             // Update UI
             updateWorkspaceDropdown();

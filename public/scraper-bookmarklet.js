@@ -1,4 +1,4 @@
-// Visual Scraper Bookmarklet - Complete Recording Version
+// Visual Scraper Bookmarklet - With Workspace Selection
 (function() {
     if (typeof window.visualScraperLoaded !== 'undefined') {
         alert('Visual Scraper is already running on this page!');
@@ -8,28 +8,35 @@
 
     const API_BASE = 'https://visual-scraper-web.vercel.app';
     let currentWorkspace = 'general';
+    let workspaces = [];
     let recordingState = null;
     
-    // First, get the current workspace from the dashboard
-    const getCurrentWorkspace = async () => {
+    // Get workspaces and current workspace
+    const loadWorkspaces = async () => {
         try {
             const response = await fetch(`${API_BASE}/api/workspaces`);
             if (response.ok) {
                 const data = await response.json();
-                if (data.success && data.workspaces.length > 0) {
-                    const lastWorkspace = localStorage.getItem('lastWorkspace') || 'general';
-                    const workspaceExists = data.workspaces.find(ws => ws.id === lastWorkspace);
-                    return workspaceExists ? lastWorkspace : 'general';
+                if (data.success) {
+                    workspaces = data.workspaces;
+                    
+                    // Get last used workspace from localStorage
+                    const lastWorkspace = localStorage.getItem('lastWorkspace');
+                    if (lastWorkspace && workspaces.find(ws => ws.id === lastWorkspace)) {
+                        currentWorkspace = lastWorkspace;
+                    } else if (workspaces.length > 0) {
+                        currentWorkspace = workspaces[0].id;
+                    }
                 }
             }
         } catch (error) {
             console.log('Could not load workspaces:', error);
+            workspaces = [{ id: 'general', name: 'General (Testing)' }];
         }
-        return 'general';
     };
 
     const createRobotSelectionPanel = async () => {
-        currentWorkspace = await getCurrentWorkspace();
+        await loadWorkspaces();
         
         // Load existing robots
         let existingRobots = [];
@@ -57,33 +64,32 @@
             borderRadius: '12px',
             boxShadow: '0 8px 25px rgba(0,0,0,0.4)',
             zIndex: '1000000',
-            minWidth: '400px',
+            minWidth: '450px',
             border: '1px solid #374151',
             color: 'white',
             fontFamily: 'Arial, sans-serif'
         });
 
-        // Get workspace name for display
-        let workspaceName = 'General';
-        try {
-            const wsResponse = await fetch(`${API_BASE}/api/workspaces`);
-            if (wsResponse.ok) {
-                const wsData = await wsResponse.json();
-                if (wsData.success) {
-                    const ws = wsData.workspaces.find(w => w.id === currentWorkspace);
-                    if (ws) workspaceName = ws.name;
-                }
-            }
-        } catch (error) {
-            console.log('Could not load workspace name:', error);
-        }
+        // Get current workspace name
+        const currentWs = workspaces.find(ws => ws.id === currentWorkspace) || workspaces[0];
+        const workspaceName = currentWs ? currentWs.name : 'General (Testing)';
 
         let panelContent = `
             <div style="text-align: center; margin-bottom: 20px;">
                 <h3 style="margin: 0 0 10px 0; color: #facc15;">🤖 Visual Scraper</h3>
                 <p style="font-size: 12px; color: #d1d5db; margin: 0 0 10px 0;">Choose a robot to extract data</p>
+                
+                <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 15px;">
+                    <label style="font-size: 12px; color: #d1d5db;">Workspace:</label>
+                    <select id="vs-workspace-select" style="background: #374151; color: white; border: 1px solid #4b5563; padding: 5px 10px; border-radius: 4px; font-size: 12px;">
+                        ${workspaces.map(ws => `
+                            <option value="${ws.id}" ${ws.id === currentWorkspace ? 'selected' : ''}>${ws.name}</option>
+                        `).join('')}
+                    </select>
+                </div>
+                
                 <div style="background: #374151; padding: 8px 12px; border-radius: 6px; font-size: 11px;">
-                    📁 Workspace: <strong>${workspaceName}</strong>
+                    📁 Selected: <strong>${workspaceName}</strong>
                 </div>
             </div>
         `;
@@ -124,7 +130,21 @@
         panel.innerHTML = panelContent;
         document.body.appendChild(panel);
 
-        // Add event listeners
+        // Add workspace selector event listener
+        const workspaceSelect = panel.querySelector('#vs-workspace-select');
+        workspaceSelect.addEventListener('change', function() {
+            currentWorkspace = this.value;
+            localStorage.setItem('lastWorkspace', currentWorkspace);
+            
+            // Update workspace display
+            const selectedWs = workspaces.find(ws => ws.id === currentWorkspace);
+            const workspaceDisplay = panel.querySelector('strong');
+            if (workspaceDisplay && selectedWs) {
+                workspaceDisplay.textContent = selectedWs.name;
+            }
+        });
+
+        // Add event listeners for robot buttons
         const robotButtons = panel.querySelectorAll('.vs-robot-btn');
         robotButtons.forEach(btn => {
             btn.addEventListener('click', function() {
@@ -223,9 +243,12 @@
             if (saveResponse.ok) {
                 const result = await saveResponse.json();
                 
+                const currentWs = workspaces.find(ws => ws.id === currentWorkspace);
+                const workspaceName = currentWs ? currentWs.name : currentWorkspace;
+                
                 let message = `✅ Data extracted successfully!\n\n`;
                 message += `🤖 Robot: ${robotName}\n`;
-                message += `📁 Workspace: ${currentWorkspace}\n`;
+                message += `📁 Workspace: ${workspaceName}\n`;
                 message += `📊 Fields extracted: ${extractedCount}\n`;
                 if (errorCount > 0) {
                     message += `⚠️ Fields with issues: ${errorCount}\n`;
@@ -264,11 +287,15 @@
     };
 
     const showRecordingInterface = (robotName) => {
+        const currentWs = workspaces.find(ws => ws.id === currentWorkspace);
+        const workspaceName = currentWs ? currentWs.name : currentWorkspace;
+
         const overlay = document.createElement('div');
         overlay.id = 'vs-recording-overlay';
         overlay.innerHTML = `
             <div style="position: fixed; top: 10px; left: 10px; background: #1f2937; color: white; padding: 15px; border-radius: 8px; z-index: 1000001; max-width: 350px; border: 2px solid #facc15;">
                 <h4 style="margin: 0 0 10px 0; color: #facc15;">🎯 Recording: ${robotName}</h4>
+                <p style="margin: 0 0 5px 0; font-size: 12px; color: #d1d5db;">Workspace: <strong>${workspaceName}</strong></p>
                 <p style="margin: 0 0 10px 0; font-size: 12px; color: #d1d5db;">Click on page elements to add fields. Click Save when done.</p>
                 <div id="vs-recorded-fields" style="max-height: 200px; overflow-y: auto; margin-bottom: 10px; font-size: 12px;">
                     <div style="color: #9ca3af; text-align: center;">No fields added yet</div>
@@ -362,7 +389,7 @@
     };
 
     const generateSelector = (element) => {
-        // Simple selector generation - you can enhance this
+        // Simple selector generation
         if (element.id) {
             return `#${element.id}`;
         }
@@ -449,9 +476,12 @@
             if (saveResponse.ok) {
                 const result = await saveResponse.json();
                 
+                const currentWs = workspaces.find(ws => ws.id === currentWorkspace);
+                const workspaceName = currentWs ? currentWs.name : currentWorkspace;
+                
                 let message = `✅ Robot "${recordingState.robotName}" saved successfully!\n\n`;
                 message += `📊 Fields: ${recordingState.selectors.length}\n`;
-                message += `📁 Workspace: ${recordingState.workspace}\n\n`;
+                message += `📁 Workspace: ${workspaceName}\n\n`;
                 message += `You can now use this robot on any website.`;
                 
                 alert(message);
