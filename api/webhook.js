@@ -70,7 +70,6 @@ export default async function handler(req, res) {
           jobs[jobId] = jobData;
           await redisClient.set('webhook_jobs', JSON.stringify(jobs));
 
-          // In a real implementation, you'd queue this for processing
           result = {
             success: true,
             jobId: jobId,
@@ -123,4 +122,108 @@ export default async function handler(req, res) {
 
           if (!workspaceData[workspaceId]) {
             workspaceData[workspaceId] = [];
-            await redisClient.set('workspace_data', JSON.stringify(works
+            await redisClient.set('workspace_data', JSON.stringify(workspaceData));
+          }
+
+          result = {
+            success: true,
+            message: `Workspace "${workspaceName}" created successfully`,
+            workspace: { id: workspaceId, name: workspaceName }
+          };
+          break;
+
+        case 'get_data':
+          // Get data from specific workspace
+          const targetWorkspace = workspace || 'general';
+          let allWorkspaceData = await redisClient.get('workspace_data');
+          if (!allWorkspaceData) {
+            allWorkspaceData = {};
+          } else {
+            allWorkspaceData = JSON.parse(allWorkspaceData);
+          }
+
+          const wsData = allWorkspaceData[targetWorkspace] || [];
+          
+          result = {
+            success: true,
+            workspace: targetWorkspace,
+            count: wsData.length,
+            data: wsData
+          };
+          break;
+
+        default:
+          return res.status(400).json({
+            success: false,
+            error: `Unknown action: ${action}. Supported actions: scrape_urls, create_workspace, get_data`
+          });
+      }
+
+      res.status(200).json(result);
+
+    } else if (req.method === 'GET') {
+      // Get job status or list webhooks
+      const { jobId, action } = req.query;
+
+      if (action === 'job_status' && jobId) {
+        let jobs = await redisClient.get('webhook_jobs');
+        if (!jobs) {
+          return res.status(404).json({
+            success: false,
+            error: 'Job not found'
+          });
+        }
+
+        jobs = JSON.parse(jobs);
+        const job = jobs[jobId];
+
+        if (!job) {
+          return res.status(404).json({
+            success: false,
+            error: 'Job not found'
+          });
+        }
+
+        res.status(200).json({
+          success: true,
+          job: job
+        });
+      } else {
+        // Return webhook API info
+        res.status(200).json({
+          success: true,
+          message: 'Visual Scraper Webhook API',
+          endpoints: {
+            'POST /api/webhooks': {
+              actions: [
+                {
+                  action: 'scrape_urls',
+                  parameters: ['urls', 'robotName', 'workspace?', 'webhookUrl?', 'secret?']
+                },
+                {
+                  action: 'create_workspace', 
+                  parameters: ['workspaceId', 'workspaceName']
+                },
+                {
+                  action: 'get_data',
+                  parameters: ['workspace?']
+                }
+              ]
+            },
+            'GET /api/webhooks': {
+              parameters: ['jobId', 'action=job_status']
+            }
+          }
+        });
+      }
+    } else {
+      res.status(405).json({ success: false, error: 'Method not allowed' });
+    }
+  } catch (error) {
+    console.error('Webhooks API error:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message
+    });
+  }
+}
