@@ -1,4 +1,4 @@
-// Visual Scraper Bookmarklet - Complete version with recording and editing
+// Visual Scraper Bookmarklet - Complete version with full editing
 (function() {
     if (typeof window.visualScraperLoaded !== 'undefined') {
         alert('Visual Scraper is already running on this page!');
@@ -8,13 +8,16 @@
 
     const API_BASE = 'https://visual-scraper-web.vercel.app';
     let currentWorkspace = 'general';
+    let workspaces = [];
     let isRecording = false;
+    let isEditingRobot = false;
     let currentRobotName = '';
     let currentSelections = [];
     let highlightOverlay = null;
     let controlPanel = null;
     let previewTooltip = null;
     let selectionCounter = null;
+    let selectionListPanel = null;
 
     // --- UI Creation Functions ---
     const createHighlightOverlay = () => {
@@ -79,6 +82,86 @@
         document.body.appendChild(selectionCounter);
     };
 
+    const createSelectionListPanel = () => {
+        selectionListPanel = document.createElement('div');
+        selectionListPanel.id = 'vs-selection-list-panel';
+        Object.assign(selectionListPanel.style, {
+            position: 'fixed',
+            top: '60px',
+            right: '20px',
+            backgroundColor: '#1f2937',
+            padding: '15px',
+            borderRadius: '12px',
+            boxShadow: '0 8px 25px rgba(0,0,0,0.4)',
+            zIndex: '1000001',
+            minWidth: '300px',
+            maxHeight: '400px',
+            overflowY: 'auto',
+            border: '1px solid #374151',
+            color: 'white',
+            fontFamily: 'Arial, sans-serif',
+            display: 'none'
+        });
+
+        updateSelectionList();
+        document.body.appendChild(selectionListPanel);
+    };
+
+    const updateSelectionList = () => {
+        if (!selectionListPanel) return;
+        
+        if (currentSelections.length === 0) {
+            selectionListPanel.innerHTML = `
+                <div style="text-align: center; color: #9ca3af; padding: 20px;">
+                    <div style="font-size: 14px; margin-bottom: 5px;">No fields selected yet</div>
+                    <div style="font-size: 12px;">Click on page elements to add fields</div>
+                </div>
+            `;
+            return;
+        }
+
+        selectionListPanel.innerHTML = `
+            <div style="margin-bottom: 10px; font-size: 14px; color: #facc15; font-weight: bold;">
+                Selected Fields (${currentSelections.length})
+            </div>
+            ${currentSelections.map((selection, index) => `
+                <div class="selection-item" data-index="${index}" 
+                     style="background: #374151; padding: 10px; margin: 8px 0; border-radius: 6px; border-left: 3px solid #facc15; cursor: pointer; transition: background 0.2s;">
+                    <div style="display: flex; justify-content: between; align-items: center;">
+                        <div style="flex: 1;">
+                            <div style="font-weight: bold; color: white; font-size: 13px;">${selection.name}</div>
+                            <div style="font-size: 11px; color: #9ca3af; word-break: break-all; margin-top: 4px;">${selection.selector}</div>
+                            <div style="font-size: 11px; color: #d1d5db; margin-top: 2px;">Preview: "${selection.preview}"</div>
+                        </div>
+                        <button class="remove-selection-btn" data-index="${index}" 
+                                style="background: #ef4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; font-size: 10px; cursor: pointer; margin-left: 10px;">
+                            Remove
+                        </button>
+                    </div>
+                </div>
+            `).join('')}
+        `;
+
+        // Add event listeners for selection items
+        selectionListPanel.querySelectorAll('.selection-item').forEach(item => {
+            item.addEventListener('mouseenter', function() {
+                this.style.background = '#4b5563';
+            });
+            item.addEventListener('mouseleave', function() {
+                this.style.background = '#374151';
+            });
+        });
+
+        // Add event listeners for remove buttons
+        selectionListPanel.querySelectorAll('.remove-selection-btn').forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                const index = parseInt(this.getAttribute('data-index'));
+                removeSelection(index);
+            });
+        });
+    };
+
     const createControlPanel = () => {
         controlPanel = document.createElement('div');
         controlPanel.id = 'vs-control-panel';
@@ -94,13 +177,45 @@
             display: 'flex',
             flexDirection: 'column',
             gap: '12px',
-            minWidth: '280px',
+            minWidth: '320px',
             border: '1px solid #374151'
         });
 
+        const headerSection = document.createElement('div');
+        headerSection.style.cssText = 'display: flex; justify-content: space-between; align-items: center;';
+        
         const instructionText = document.createElement('div');
-        instructionText.style.cssText = 'color: #d1d5db; font-size: 12px; text-align: center; font-family: Arial, sans-serif;';
-        instructionText.textContent = 'Click elements to select data fields';
+        instructionText.style.cssText = 'color: #d1d5db; font-size: 12px; font-family: Arial, sans-serif;';
+        instructionText.textContent = isEditingRobot ? `Editing: ${currentRobotName}` : 'Click elements to select data fields';
+
+        const viewListBtn = document.createElement('button');
+        viewListBtn.id = 'vs-view-list-btn';
+        viewListBtn.textContent = '📋 View Fields';
+        Object.assign(viewListBtn.style, {
+            backgroundColor: '#8b5cf6',
+            color: '#ffffff',
+            padding: '6px 12px',
+            border: 'none',
+            borderRadius: '6px',
+            fontWeight: '600',
+            cursor: 'pointer',
+            fontSize: '11px',
+            fontFamily: 'Arial, sans-serif',
+            transition: 'all 0.2s ease'
+        });
+
+        viewListBtn.addEventListener('click', toggleSelectionList);
+        viewListBtn.addEventListener('mouseenter', function() {
+            this.style.backgroundColor = '#7c3aed';
+            this.style.transform = 'translateY(-1px)';
+        });
+        viewListBtn.addEventListener('mouseleave', function() {
+            this.style.backgroundColor = '#8b5cf6';
+            this.style.transform = 'translateY(0)';
+        });
+
+        headerSection.appendChild(instructionText);
+        headerSection.appendChild(viewListBtn);
 
         const buttonContainer = document.createElement('div');
         buttonContainer.style.cssText = 'display: flex; gap: 8px;';
@@ -113,33 +228,41 @@
             Object.assign(removeButton.style, {
                 backgroundColor: '#f59e0b',
                 color: '#ffffff',
-                padding: '12px 16px',
+                padding: '10px 14px',
                 border: 'none',
                 borderRadius: '8px',
                 fontWeight: '600',
                 cursor: 'pointer',
-                fontSize: '13px',
+                fontSize: '12px',
                 fontFamily: 'Arial, sans-serif',
                 transition: 'all 0.2s ease',
                 flex: '1'
             });
 
             removeButton.addEventListener('click', removeLastSelection);
+            removeButton.addEventListener('mouseenter', function() {
+                this.style.backgroundColor = '#eab308';
+                this.style.transform = 'translateY(-1px)';
+            });
+            removeButton.addEventListener('mouseleave', function() {
+                this.style.backgroundColor = '#f59e0b';
+                this.style.transform = 'translateY(0)';
+            });
             buttonContainer.appendChild(removeButton);
         }
 
         const finishButton = document.createElement('button');
         finishButton.id = 'vs-finish-button';
-        finishButton.textContent = 'Finish & Save Robot';
+        finishButton.textContent = isEditingRobot ? '💾 Update Robot' : '💾 Save Robot';
         Object.assign(finishButton.style, {
             backgroundColor: '#10b981',
             color: '#ffffff',
-            padding: '12px 16px',
+            padding: '10px 14px',
             border: 'none',
             borderRadius: '8px',
             fontWeight: '600',
             cursor: 'pointer',
-            fontSize: '13px',
+            fontSize: '12px',
             fontFamily: 'Arial, sans-serif',
             transition: 'all 0.2s ease',
             flex: '1'
@@ -147,16 +270,16 @@
 
         const stopButton = document.createElement('button');
         stopButton.id = 'vs-stop-button';
-        stopButton.textContent = 'Cancel';
+        stopButton.textContent = '❌ Cancel';
         Object.assign(stopButton.style, {
             backgroundColor: '#ef4444',
             color: '#ffffff',
-            padding: '12px 16px',
+            padding: '10px 14px',
             border: 'none',
             borderRadius: '8px',
             fontWeight: '600',
             cursor: 'pointer',
-            fontSize: '13px',
+            fontSize: '12px',
             fontFamily: 'Arial, sans-serif',
             transition: 'all 0.2s ease',
             flex: '1'
@@ -165,7 +288,7 @@
         // Hover effects
         [finishButton, stopButton].forEach(button => {
             button.addEventListener('mouseenter', function() {
-                this.style.transform = 'translateY(-2px)';
+                this.style.transform = 'translateY(-1px)';
             });
             button.addEventListener('mouseleave', function() {
                 this.style.transform = 'translateY(0)';
@@ -177,9 +300,20 @@
 
         buttonContainer.appendChild(stopButton);
         buttonContainer.appendChild(finishButton);
-        controlPanel.appendChild(instructionText);
+        controlPanel.appendChild(headerSection);
         controlPanel.appendChild(buttonContainer);
         document.body.appendChild(controlPanel);
+    };
+
+    const toggleSelectionList = () => {
+        if (!selectionListPanel) return;
+        
+        if (selectionListPanel.style.display === 'none' || !selectionListPanel.style.display) {
+            selectionListPanel.style.display = 'block';
+            updateSelectionList();
+        } else {
+            selectionListPanel.style.display = 'none';
+        }
     };
 
     const updateSelectionCounter = () => {
@@ -188,39 +322,57 @@
             selectionCounter.textContent = `${count} field${count !== 1 ? 's' : ''} selected`;
             selectionCounter.style.backgroundColor = count > 0 ? '#10b981' : '#facc15';
         }
+        updateSelectionList();
     };
 
     const removeLastSelection = () => {
         if (currentSelections.length > 0) {
             currentSelections.pop();
             updateSelectionCounter();
-            
-            // Show removal feedback
-            const feedback = document.createElement('div');
-            feedback.style.cssText = `
-                position: fixed;
-                top: 60px;
-                right: 20px;
-                background: #f59e0b;
-                color: white;
-                padding: 8px 16px;
-                border-radius: 20px;
-                font-size: 14px;
-                font-family: Arial, sans-serif;
-                z-index: 1000002;
-            `;
-            feedback.textContent = 'Last field removed';
-            document.body.appendChild(feedback);
-            
-            setTimeout(() => {
-                feedback.style.opacity = '0';
-                setTimeout(() => feedback.remove(), 300);
-            }, 2000);
+            showFeedback('Last field removed', '#f59e0b');
             
             // Recreate control panel to update buttons
             if (controlPanel) controlPanel.remove();
             createControlPanel();
         }
+    };
+
+    const removeSelection = (index) => {
+        if (currentSelections[index]) {
+            const removedName = currentSelections[index].name;
+            currentSelections.splice(index, 1);
+            updateSelectionCounter();
+            showFeedback(`Field "${removedName}" removed`, '#f59e0b');
+            
+            // Recreate control panel to update buttons
+            if (controlPanel) controlPanel.remove();
+            createControlPanel();
+        }
+    };
+
+    const showFeedback = (message, color = '#10b981') => {
+        const feedback = document.createElement('div');
+        feedback.style.cssText = `
+            position: fixed;
+            top: 60px;
+            right: 20px;
+            background: ${color};
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            font-family: Arial, sans-serif;
+            z-index: 1000002;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        `;
+        feedback.textContent = message;
+        document.body.appendChild(feedback);
+        
+        setTimeout(() => {
+            feedback.style.opacity = '0';
+            feedback.style.transform = 'translateY(-10px)';
+            setTimeout(() => feedback.remove(), 300);
+        }, 2000);
     };
 
     // --- Event Handlers for Recording ---
@@ -287,31 +439,9 @@
             });
             updateSelectionCounter();
             
-            // Show success indicator (no confirmation dialog)
-            const successIndicator = document.createElement('div');
-            successIndicator.style.cssText = `
-                position: absolute;
-                top: ${target.getBoundingClientRect().top + window.scrollY}px;
-                left: ${target.getBoundingClientRect().left + window.scrollX}px;
-                background: #10b981;
-                color: #ffffff;
-                padding: 4px 8px;
-                border-radius: 4px;
-                font-size: 12px;
-                font-family: Arial, sans-serif;
-                z-index: 1000002;
-                pointer-events: none;
-                transition: opacity 0.3s ease;
-            `;
-            successIndicator.textContent = `✓ ${dataName.trim()}`;
-            document.body.appendChild(successIndicator);
-
-            setTimeout(() => {
-                successIndicator.style.opacity = '0';
-                setTimeout(() => successIndicator.remove(), 300);
-            }, 2000);
+            showFeedback(`✓ ${dataName.trim()} added`, '#10b981');
             
-            // Recreate control panel to update remove button
+            // Recreate control panel to update buttons
             if (controlPanel) controlPanel.remove();
             createControlPanel();
         }
@@ -354,7 +484,9 @@
             `\n\nFields: ${currentSelections.map(s => s.name).join(', ')}` : 
             '\n\nNo fields selected yet - you can add them later by editing the robot.';
 
-        const confirmMessage = `Save robot "${currentRobotName}" with ${currentSelections.length} selected fields?${fieldList}`;
+        const confirmMessage = isEditingRobot ? 
+            `Update robot "${currentRobotName}" with ${currentSelections.length} fields?${fieldList}` :
+            `Save robot "${currentRobotName}" with ${currentSelections.length} selected fields?${fieldList}`;
 
         if (confirm(confirmMessage)) {
             try {
@@ -376,12 +508,13 @@
 
                 if (saveResponse.ok) {
                     const result = await saveResponse.json();
-                    alert(`✅ Robot "${currentRobotName}" saved successfully with ${currentSelections.length} fields!\n\n📁 Workspace: ${currentWorkspace}\n\nYou can now use this robot to extract data from any page!`);
+                    const action = isEditingRobot ? 'updated' : 'saved';
+                    alert(`✅ Robot "${currentRobotName}" ${action} successfully with ${currentSelections.length} fields!\n\n📁 Workspace: ${currentWorkspace}\n\nYou can now use this robot to extract data from any page!`);
                 } else {
                     throw new Error('Failed to save robot to API');
                 }
             } catch (error) {
-                alert(`❌ Error saving robot: ${error.message}\n\nBut don't worry! The robot has been saved locally. You can use it with the Chrome extension.`);
+                alert(`❌ Error ${isEditingRobot ? 'updating' : 'saving'} robot: ${error.message}`);
             } finally {
                 cleanup();
             }
@@ -390,24 +523,20 @@
 
     const stopRecording = () => {
         isRecording = false;
-        if (highlightOverlay) highlightOverlay.remove();
-        if (previewTooltip) previewTooltip.remove();
-        if (selectionCounter) selectionCounter.remove();
-        if (controlPanel) controlPanel.remove();
-
-        document.removeEventListener('mouseover', handleMouseOver, true);
-        document.removeEventListener('mouseout', handleMouseOut, true);
-        document.removeEventListener('click', handleClick, true);
+        isEditingRobot = false;
+        cleanup();
     };
 
-    const startRecording = (robotName) => {
+    const startRecording = (robotName, editMode = false, existingSelectors = []) => {
         isRecording = true;
+        isEditingRobot = editMode;
         currentRobotName = robotName;
-        currentSelections = [];
+        currentSelections = editMode ? [...existingSelectors] : [];
 
         createHighlightOverlay();
         createPreviewTooltip();
         createSelectionCounter();
+        createSelectionListPanel();
         createControlPanel();
 
         updateSelectionCounter();
@@ -416,8 +545,12 @@
         document.addEventListener('mouseout', handleMouseOut, true);
         document.addEventListener('click', handleClick, true);
 
+        const message = editMode ? 
+            `🎯 Editing robot "${robotName}"!\n\n📁 Workspace: ${currentWorkspace}\n\n✨ Instructions:\n• Click elements to add new fields\n• Use "View Fields" to see and remove existing fields\n• Click "Update Robot" when done` :
+            `🎯 Recording started for "${robotName}"!\n\n📁 Workspace: ${currentWorkspace}\n\n✨ Instructions:\n• Click elements to select data fields\n• Use "View Fields" to see and remove fields\n• Click "Save Robot" when done`;
+
         setTimeout(() => {
-            alert(`🎯 Recording started for "${robotName}"!\n\n📁 Workspace: ${currentWorkspace}\n\n✨ Instructions:\n• Click elements to select data fields\n• Use "Remove Last" if you make a mistake\n• Click "Finish & Save Robot" when done`);
+            alert(message);
         }, 500);
     };
 
@@ -439,17 +572,40 @@
         return 'general';
     };
 
+    const loadWorkspaces = async () => {
+        try {
+            const response = await fetch(`${API_BASE}/api/workspaces`);
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) {
+                    workspaces = data.workspaces;
+                    
+                    // Get last used workspace from localStorage
+                    const lastWorkspace = localStorage.getItem('lastWorkspace');
+                    if (lastWorkspace && workspaces.find(ws => ws.id === lastWorkspace)) {
+                        currentWorkspace = lastWorkspace;
+                    } else if (workspaces.length > 0) {
+                        currentWorkspace = workspaces[0].id;
+                    }
+                }
+            }
+        } catch (error) {
+            console.log('Could not load workspaces:', error);
+            workspaces = [{ id: 'general', name: 'General (Testing)' }];
+        }
+    };
+
     const createRobotSelectionPanel = async () => {
-        currentWorkspace = await getCurrentWorkspace();
+        await loadWorkspaces();
         
         // Load existing robots
-        let existingRobots = [];
+        let existingRobots = {};
         try {
             const response = await fetch(`${API_BASE}/api/robots`);
             if (response.ok) {
                 const data = await response.json();
                 if (data.success) {
-                    existingRobots = Object.keys(data.robots);
+                    existingRobots = data.robots;
                 }
             }
         } catch (error) {
@@ -468,48 +624,47 @@
             borderRadius: '12px',
             boxShadow: '0 8px 25px rgba(0,0,0,0.4)',
             zIndex: '1000000',
-            minWidth: '450px',
+            minWidth: '500px',
             border: '1px solid #374151',
             color: 'white',
             fontFamily: 'Arial, sans-serif'
         });
 
-        // Get workspace name for display
-        let workspaceName = 'General';
-        try {
-            const wsResponse = await fetch(`${API_BASE}/api/workspaces`);
-            if (wsResponse.ok) {
-                const wsData = await wsResponse.json();
-                if (wsData.success) {
-                    const ws = wsData.workspaces.find(w => w.id === currentWorkspace);
-                    if (ws) workspaceName = ws.name;
-                }
-            }
-        } catch (error) {
-            console.log('Could not load workspace name:', error);
-        }
+        // Get current workspace name
+        const currentWs = workspaces.find(ws => ws.id === currentWorkspace) || workspaces[0];
+        const workspaceName = currentWs ? currentWs.name : 'General (Testing)';
 
         let panelContent = `
             <div style="text-align: center; margin-bottom: 20px;">
                 <h3 style="margin: 0 0 10px 0; color: #facc15;">🤖 Visual Scraper</h3>
                 <p style="font-size: 12px; color: #d1d5db; margin: 0 0 10px 0;">Choose a robot to extract data</p>
+                
+                <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 15px;">
+                    <label style="font-size: 12px; color: #d1d5db;">Workspace:</label>
+                    <select id="vs-workspace-select" style="background: #374151; color: white; border: 1px solid #4b5563; padding: 5px 10px; border-radius: 4px; font-size: 12px;">
+                        ${workspaces.map(ws => `
+                            <option value="${ws.id}" ${ws.id === currentWorkspace ? 'selected' : ''}>${ws.name}</option>
+                        `).join('')}
+                    </select>
+                </div>
+                
                 <div style="background: #374151; padding: 8px 12px; border-radius: 6px; font-size: 11px;">
-                    📁 Workspace: <strong>${workspaceName}</strong>
+                    📁 Selected: <strong>${workspaceName}</strong>
                 </div>
             </div>
         `;
 
-        if (existingRobots.length > 0) {
+        if (Object.keys(existingRobots).length > 0) {
             panelContent += `
                 <div style="margin-bottom: 15px;">
                     <h4 style="margin: 0 0 10px 0; color: #d1d5db; font-size: 14px;">Use Existing Robot:</h4>
-                    ${existingRobots.map(robot => `
+                    ${Object.entries(existingRobots).map(([robotName, selectors]) => `
                         <div style="display: flex; gap: 5px; margin: 5px 0;">
-                            <button class="vs-robot-btn" data-robot="${robot}" 
+                            <button class="vs-robot-btn" data-robot="${robotName}" 
                                     style="flex: 1; background: #374151; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; text-align: left; transition: background 0.2s;">
-                                🚀 ${robot}
+                                🚀 ${robotName} <span style="font-size: 11px; color: #9ca3af;">(${selectors.length} fields)</span>
                             </button>
-                            <button class="vs-edit-robot-btn" data-robot="${robot}" 
+                            <button class="vs-edit-robot-btn" data-robot="${robotName}" data-selectors='${JSON.stringify(selectors)}'
                                     style="background: #f59e0b; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; transition: background 0.2s; width: 50px;">
                                 ✏️
                             </button>
@@ -541,6 +696,20 @@
         panel.innerHTML = panelContent;
         document.body.appendChild(panel);
 
+        // Add workspace selector event listener
+        const workspaceSelect = panel.querySelector('#vs-workspace-select');
+        workspaceSelect.addEventListener('change', function() {
+            currentWorkspace = this.value;
+            localStorage.setItem('lastWorkspace', currentWorkspace);
+            
+            // Update workspace display
+            const selectedWs = workspaces.find(ws => ws.id === currentWorkspace);
+            const workspaceDisplay = panel.querySelector('strong');
+            if (workspaceDisplay && selectedWs) {
+                workspaceDisplay.textContent = selectedWs.name;
+            }
+        });
+
         // Add event listeners for robot buttons
         const robotButtons = panel.querySelectorAll('.vs-robot-btn');
         robotButtons.forEach(btn => {
@@ -563,7 +732,11 @@
         editButtons.forEach(btn => {
             btn.addEventListener('click', function() {
                 const robotName = this.getAttribute('data-robot');
-                alert(`To edit robot "${robotName}", please use the Chrome extension popup:\n\n1. Click the Visual Scraper extension icon\n2. Find "${robotName}" in your robots list\n3. Click the "Edit" button\n4. The extension will open recording mode for editing`);
+                const selectors = JSON.parse(this.getAttribute('data-selectors'));
+                
+                // Start editing the robot
+                startRecording(robotName, true, selectors);
+                panel.remove();
             });
             
             btn.addEventListener('mouseenter', function() {
@@ -689,6 +862,7 @@
         if (previewTooltip) previewTooltip.remove();
         if (selectionCounter) selectionCounter.remove();
         if (controlPanel) controlPanel.remove();
+        if (selectionListPanel) selectionListPanel.remove();
 
         document.removeEventListener('mouseover', handleMouseOver, true);
         document.removeEventListener('mouseout', handleMouseOut, true);
