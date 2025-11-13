@@ -1,5 +1,4 @@
-// Version 4.1: Fixed CSP errors for XLSX, added robot validation for bulk scraping
-// Patched: Added 4s delay for bulk scraping and fixed data duplication issue.
+// Version 5.0: Fixed robot editing, improved button functionality, streamlined recording
 document.addEventListener('DOMContentLoaded', () => {
     // --- DOM Elements ---
     const views = {
@@ -232,7 +231,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         return;
                     }
                     
-                    // MODIFICATION: Set delay to 4 seconds for page load as requested.
+                    // Set delay to 4 seconds for page load as requested.
                     setTimeout(() => {
                         chrome.storage.local.get({ robots: {} }, (result) => {
                             if (chrome.runtime.lastError) {
@@ -294,9 +293,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const updateProgress = (current, total, message) => {
         const percentage = total > 0 ? (current / total) * 100 : 0;
-        progressFill.style.width = `${percentage}%`;
-        progressText.textContent = message;
-        loadingText.textContent = current === total ? 'Bulk scraping completed!' : 'Processing URLs...';
+        if (progressFill) progressFill.style.width = `${percentage}%`;
+        if (progressText) progressText.textContent = message;
+        if (loadingText) loadingText.textContent = current === total ? 'Bulk scraping completed!' : 'Processing URLs...';
     };
 
     const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -370,115 +369,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
-    // --- Event Listeners ---
-    startRecordingBtn.addEventListener('click', async () => {
-        const robotName = robotNameInput.value.trim();
-        if (!robotName) {
-            showNotification('Please enter a name for your robot', 'error');
-            robotNameInput.focus();
-            return;
-        }
-        
-        let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-        chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            files: ['content.js']
-        }, () => {
-            chrome.tabs.sendMessage(tab.id, { action: 'startRecording', robotName: robotName });
-            window.close();
-        });
-    });
-
-    backToMainBtn.addEventListener('click', () => switchView('main'));
-
-    startBulkScrapingBtn.addEventListener('click', () => {
-        const urlsText = bulkUrlsInput.value.trim();
-        if (!urlsText) {
-            showNotification('Please enter at least one URL', 'error');
-            return;
-        }
-        
-        const urls = urlsText.split('\n')
-            .map(url => url.trim())
-            .filter(url => url && isValidUrl(url));
-        
-        if (urls.length === 0) {
-            showNotification('Please enter valid URLs (must start with http:// or https://)', 'error');
-            return;
-        }
-        
-        const robotName = bulkRobotNameSpan.textContent;
-        if (!robotName) {
-            showNotification('No robot selected for bulk scraping', 'error');
-            return;
-        }
-        
-        processBulkUrls(robotName, urls);
-    });
-
-    cancelBulkBtn.addEventListener('click', () => switchView('main'));
-
-    exportDropdownBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        exportDropdownContent.classList.toggle('show');
-    });
-
-    document.addEventListener('click', () => {
-        exportDropdownContent.classList.remove('show');
-    });
-
-    exportDropdownContent.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const format = e.target.dataset.format;
-        
-        switch(format) {
-            case 'csv':
-                exportAsCSV();
-                break;
-            case 'json':
-                exportAsJSON();
-                break;
-            case 'excel':
-                exportAsExcel();
-                break;
-            case 'sheets':
-                exportToGoogleSheets();
-                break;
-        }
-        
-        exportDropdownContent.classList.remove('show');
-    });
-
-    if (saveEditBtn) {
-        saveEditBtn.addEventListener('click', () => {
-            chrome.storage.local.get({ robots: {} }, (result) => {
-                const robots = result.robots;
-                if (robots[activeRobotName]) {
-                    chrome.storage.local.set({ robots }, () => {
-                        showNotification(`Robot "${activeRobotName}" updated successfully`, 'success');
-                        switchView('main');
-                        loadRobots();
-                    });
-                }
-            });
-        });
-    }
-
-    if (cancelEditBtn) {
-        cancelEditBtn.addEventListener('click', () => switchView('main'));
-    }
-
-    // --- Utility Functions ---
-    const isValidUrl = (string) => {
-        try {
-            new URL(string);
-            return string.startsWith('http://') || string.startsWith('https://');
-        } catch (_) {
-            return false;
-        }
-    };
-
-    // --- UI Update Functions ---
+    // --- Robot Management ---
     function loadRobots() {
         chrome.storage.local.get({ robots: {} }, (result) => {
             const robots = result.robots;
@@ -511,7 +402,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <button data-robot-name="${name}" class="bulk-btn btn-primary">
                                 <i class="bx bx-link"></i>Bulk
                             </button>
-                            <button data-robot-name="${name}" class="edit-btn btn-primary">
+                            <button data-robot-name="${name}" class="edit-robot-btn btn-primary">
                                 <i class="bx bx-edit"></i>Edit
                             </button>
                             <button data-robot-name="${name}" class="delete-btn btn-danger">
@@ -523,17 +414,91 @@ document.addEventListener('DOMContentLoaded', () => {
                 robotsList.appendChild(robotDiv);
             });
 
+            // Add event listeners
             document.querySelectorAll('.run-btn').forEach(btn => btn.addEventListener('click', runRobot));
             document.querySelectorAll('.bulk-btn').forEach(btn => btn.addEventListener('click', showBulkView));
-            document.querySelectorAll('.edit-btn').forEach(btn => btn.addEventListener('click', () => showEditView(btn.dataset.robotName)));
+            document.querySelectorAll('.edit-robot-btn').forEach(btn => btn.addEventListener('click', editRobot));
             document.querySelectorAll('.delete-btn').forEach(btn => btn.addEventListener('click', deleteRobot));
         });
     }
 
+    async function editRobot(event) {
+        const robotName = event.target.closest('button').dataset.robotName;
+        
+        let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ['content.js']
+        }, () => {
+            chrome.tabs.sendMessage(tab.id, { 
+                action: 'editRobot', 
+                robotName: robotName 
+            });
+            window.close();
+        });
+    }
+
+    async function runRobot(event) {
+        activeRobotName = event.target.closest('button').dataset.robotName;
+        switchView('loading');
+        updateProgress(0, 1, 'Extracting data...');
+        
+        chrome.storage.local.get({ robots: {} }, async (result) => {
+            const robotSelectors = result.robots[activeRobotName];
+            if (!robotSelectors) {
+                showNotification(`Robot "${activeRobotName}" not found`, 'error');
+                switchView('main');
+                return;
+            }
+            let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['content.js']
+            }, () => {
+                chrome.tabs.sendMessage(tab.id, { 
+                    action: 'runExtraction', 
+                    selectors: robotSelectors, 
+                    robotName: activeRobotName 
+                });
+            });
+        });
+    }
+
+    function showBulkView(event) {
+        activeRobotName = event.target.closest('button').dataset.robotName;
+        chrome.storage.local.get({ robots: {} }, (result) => {
+            if (!result.robots[activeRobotName]) {
+                showNotification(`Robot "${activeRobotName}" not found`, 'error');
+                return;
+            }
+            bulkRobotNameSpan.textContent = activeRobotName;
+            bulkUrlsInput.value = '';
+            switchView('bulkUrls');
+        });
+    }
+
+    function deleteRobot(event) {
+        const robotName = event.target.closest('button').dataset.robotName;
+        const confirmDelete = confirm(`🤖 Delete Robot "${robotName}"?\n\n⚠️ This action cannot be undone.\n\n✅ Click OK to delete\n❌ Click Cancel to keep`);
+        
+        if (confirmDelete) {
+            chrome.storage.local.get({ robots: {} }, (result) => {
+                delete result.robots[robotName];
+                chrome.storage.local.set({ robots: result.robots }, () => {
+                    loadRobots();
+                    showNotification(`Robot "${robotName}" deleted successfully`, 'success');
+                });
+            });
+        }
+    }
+
+    // --- Results Display ---
     function displayResultsUI(data) {
         extractedData = data;
+        if (!resultsContainer) return;
+        
         resultsContainer.innerHTML = '';
-        resultsCount.textContent = `${data.length} result${data.length !== 1 ? 's' : ''}`;
+        if (resultsCount) resultsCount.textContent = `${data.length} result${data.length !== 1 ? 's' : ''}`;
     
         if (!data || data.length === 0) {
             resultsContainer.innerHTML = `
@@ -593,59 +558,115 @@ document.addEventListener('DOMContentLoaded', () => {
         return 'tag';
     }
 
-    async function runRobot(event) {
-        activeRobotName = event.target.dataset.robotName;
-        switchView('loading');
-        updateProgress(0, 1, 'Extracting data...');
-        
-        chrome.storage.local.get({ robots: {} }, async (result) => {
-            const robotSelectors = result.robots[activeRobotName];
-            if (!robotSelectors) {
-                showNotification(`Robot "${activeRobotName}" not found`, 'error');
-                switchView('main');
-                return;
-            }
-            let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-            chrome.scripting.executeScript({
-                target: { tabId: tab.id },
-                files: ['content.js']
-            }, () => {
-                chrome.tabs.sendMessage(tab.id, { 
-                    action: 'runExtraction', 
-                    selectors: robotSelectors, 
-                    robotName: activeRobotName 
-                });
-            });
-        });
-    }
-
-    function showBulkView(event) {
-        activeRobotName = event.target.dataset.robotName;
-        chrome.storage.local.get({ robots: {} }, (result) => {
-            if (!result.robots[activeRobotName]) {
-                showNotification(`Robot "${activeRobotName}" not found`, 'error');
-                return;
-            }
-            bulkRobotNameSpan.textContent = activeRobotName;
-            bulkUrlsInput.value = '';
-            switchView('bulkUrls');
-        });
-    }
-
-    function deleteRobot(event) {
-        const robotName = event.target.closest('button').dataset.robotName;
-        const confirmDelete = confirm(`🤖 Delete Robot "${robotName}"?\n\n⚠️ This action cannot be undone.\n\n✓ Click OK to delete\n✗ Click Cancel to keep`);
-        
-        if (confirmDelete) {
-            chrome.storage.local.get({ robots: {} }, (result) => {
-                delete result.robots[robotName];
-                chrome.storage.local.set({ robots: result.robots }, () => {
-                    loadRobots();
-                    showNotification(`Robot "${robotName}" deleted successfully`, 'success');
-                });
-            });
+    // --- Event Listeners ---
+    startRecordingBtn.addEventListener('click', async () => {
+        const robotName = robotNameInput.value.trim();
+        if (!robotName) {
+            showNotification('Please enter a name for your robot', 'error');
+            robotNameInput.focus();
+            return;
         }
+        
+        let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ['content.js']
+        }, () => {
+            chrome.tabs.sendMessage(tab.id, { action: 'startRecording', robotName: robotName });
+            window.close();
+        });
+    });
+
+    backToMainBtn.addEventListener('click', () => switchView('main'));
+
+    startBulkScrapingBtn.addEventListener('click', () => {
+        const urlsText = bulkUrlsInput.value.trim();
+        if (!urlsText) {
+            showNotification('Please enter at least one URL', 'error');
+            return;
+        }
+        
+        const urls = urlsText.split('\n')
+            .map(url => url.trim())
+            .filter(url => url && isValidUrl(url));
+        
+        if (urls.length === 0) {
+            showNotification('Please enter valid URLs (must start with http:// or https://)', 'error');
+            return;
+        }
+        
+        const robotName = bulkRobotNameSpan.textContent;
+        if (!robotName) {
+            showNotification('No robot selected for bulk scraping', 'error');
+            return;
+        }
+        
+        processBulkUrls(robotName, urls);
+    });
+
+    cancelBulkBtn.addEventListener('click', () => switchView('main'));
+
+    exportDropdownBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (exportDropdownContent) exportDropdownContent.classList.toggle('show');
+    });
+
+    document.addEventListener('click', () => {
+        if (exportDropdownContent) exportDropdownContent.classList.remove('show');
+    });
+
+    if (exportDropdownContent) {
+        exportDropdownContent.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const format = e.target.dataset.format;
+            
+            switch(format) {
+                case 'csv':
+                    exportAsCSV();
+                    break;
+                case 'json':
+                    exportAsJSON();
+                    break;
+                case 'excel':
+                    exportAsExcel();
+                    break;
+                case 'sheets':
+                    exportToGoogleSheets();
+                    break;
+            }
+            
+            exportDropdownContent.classList.remove('show');
+        });
     }
+
+    if (saveEditBtn) {
+        saveEditBtn.addEventListener('click', () => {
+            chrome.storage.local.get({ robots: {} }, (result) => {
+                const robots = result.robots;
+                if (robots[activeRobotName]) {
+                    chrome.storage.local.set({ robots }, () => {
+                        showNotification(`Robot "${activeRobotName}" updated successfully`, 'success');
+                        switchView('main');
+                        loadRobots();
+                    });
+                }
+            });
+        });
+    }
+
+    if (cancelEditBtn) {
+        cancelEditBtn.addEventListener('click', () => switchView('main'));
+    }
+
+    // --- Utility Functions ---
+    const isValidUrl = (string) => {
+        try {
+            new URL(string);
+            return string.startsWith('http://') || string.startsWith('https://');
+        } catch (_) {
+            return false;
+        }
+    };
 
     function showNotification(message, type = 'success') {
         const notification = document.createElement('div');

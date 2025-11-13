@@ -1,4 +1,4 @@
-// Version 2.0: Added support for editing individual selectors
+// Version 3.0: Fixed recording buttons, added edit functionality, streamlined element selection
 if (typeof window.visualScraperLoaded === 'undefined') {
     window.visualScraperLoaded = true;
 
@@ -26,7 +26,8 @@ if (typeof window.visualScraperLoaded === 'undefined') {
             pointerEvents: 'none',
             zIndex: '999998',
             transition: 'all 0.2s ease-out',
-            boxShadow: '0 4px 12px rgba(250, 204, 21, 0.4)'
+            boxShadow: '0 4px 12px rgba(250, 204, 21, 0.4)',
+            display: 'none'
         });
         document.body.appendChild(highlightOverlay);
     };
@@ -94,24 +95,26 @@ if (typeof window.visualScraperLoaded === 'undefined') {
             display: 'flex',
             flexDirection: 'column',
             gap: '12px',
-            minWidth: '200px',
+            minWidth: '280px',
             border: '1px solid #374151'
         });
 
         const instructionText = document.createElement('div');
         instructionText.style.cssText = 'color: #d1d5db; font-size: 12px; text-align: center; font-family: Inter, sans-serif;';
-        instructionText.textContent = isEditingSelector ? `Click an element to update "${editingSelectorName}"` : 'Click elements to select data fields';
+        instructionText.textContent = isEditingSelector ? 
+            `Click an element to update "${editingSelectorName}"` : 
+            'Click elements to select data fields';
 
         const buttonContainer = document.createElement('div');
         buttonContainer.style.cssText = 'display: flex; gap: 8px;';
 
         const finishButton = document.createElement('button');
         finishButton.id = 'vs-finish-button';
-        finishButton.textContent = isEditingSelector ? 'Save Selector' : 'Finish & Save';
+        finishButton.textContent = isEditingSelector ? 'Save Selector' : 'Finish & Save Robot';
         Object.assign(finishButton.style, {
-            backgroundColor: '#facc15',
-            color: '#111827',
-            padding: '10px 15px',
+            backgroundColor: '#10b981',
+            color: '#ffffff',
+            padding: '12px 16px',
             border: 'none',
             borderRadius: '8px',
             fontWeight: '600',
@@ -128,7 +131,7 @@ if (typeof window.visualScraperLoaded === 'undefined') {
         Object.assign(stopButton.style, {
             backgroundColor: '#ef4444',
             color: '#ffffff',
-            padding: '10px 15px',
+            padding: '12px 16px',
             border: 'none',
             borderRadius: '8px',
             fontWeight: '600',
@@ -139,39 +142,92 @@ if (typeof window.visualScraperLoaded === 'undefined') {
             flex: '1'
         });
 
-        finishButton.addEventListener('mouseenter', () => {
-            finishButton.style.backgroundColor = '#eab308';
-            finishButton.style.transform = 'translateY(-2px)';
-        });
-        finishButton.addEventListener('mouseleave', () => {
-            finishButton.style.backgroundColor = '#facc15';
-            finishButton.style.transform = 'translateY(0)';
+        // Add remove button if not editing and has selections
+        if (!isEditingSelector && currentSelections.length > 0) {
+            const removeButton = document.createElement('button');
+            removeButton.id = 'vs-remove-button';
+            removeButton.textContent = 'Remove Last';
+            Object.assign(removeButton.style, {
+                backgroundColor: '#f59e0b',
+                color: '#ffffff',
+                padding: '12px 16px',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontFamily: 'Inter, sans-serif',
+                transition: 'all 0.2s ease',
+                flex: '1'
+            });
+
+            removeButton.addEventListener('click', removeLastSelection);
+            buttonContainer.appendChild(removeButton);
+        }
+
+        // Hover effects
+        [finishButton, stopButton].forEach(button => {
+            button.addEventListener('mouseenter', function() {
+                this.style.transform = 'translateY(-2px)';
+            });
+            button.addEventListener('mouseleave', function() {
+                this.style.transform = 'translateY(0)';
+            });
         });
 
-        stopButton.addEventListener('mouseenter', () => {
-            stopButton.style.backgroundColor = '#dc2626';
-            stopButton.style.transform = 'translateY(-2px)';
-        });
-        stopButton.addEventListener('mouseleave', () => {
-            stopButton.style.backgroundColor = '#ef4444';
-            stopButton.style.transform = 'translateY(0)';
-        });
+        finishButton.addEventListener('click', isEditingSelector ? saveEditedSelector : stopAndSave);
+        stopButton.addEventListener('click', stopRecording);
 
         buttonContainer.appendChild(stopButton);
         buttonContainer.appendChild(finishButton);
         controlPanel.appendChild(instructionText);
         controlPanel.appendChild(buttonContainer);
         document.body.appendChild(controlPanel);
-
-        finishButton.addEventListener('click', isEditingSelector ? saveEditedSelector : stopAndSave);
-        stopButton.addEventListener('click', stopRecording);
     };
 
     const updateSelectionCounter = () => {
-        if (selectionCounter && !isEditingSelector) {
-            const count = currentSelections.length;
-            selectionCounter.textContent = `${count} field${count !== 1 ? 's' : ''} selected`;
-            selectionCounter.style.backgroundColor = count > 0 ? '#10b981' : '#facc15';
+        if (selectionCounter) {
+            if (isEditingSelector) {
+                selectionCounter.textContent = `Editing: ${editingSelectorName}`;
+                selectionCounter.style.backgroundColor = '#f59e0b';
+            } else {
+                const count = currentSelections.length;
+                selectionCounter.textContent = `${count} field${count !== 1 ? 's' : ''} selected`;
+                selectionCounter.style.backgroundColor = count > 0 ? '#10b981' : '#facc15';
+            }
+        }
+    };
+
+    const removeLastSelection = () => {
+        if (currentSelections.length > 0) {
+            currentSelections.pop();
+            updateSelectionCounter();
+            
+            // Show removal feedback
+            const feedback = document.createElement('div');
+            feedback.style.cssText = `
+                position: fixed;
+                top: '60px';
+                right: '20px';
+                background: #f59e0b;
+                color: white;
+                padding: '8px 16px';
+                border-radius: '20px';
+                font-size: '14px';
+                font-family: Inter, sans-serif;
+                z-index: '1000002';
+            `;
+            feedback.textContent = 'Last field removed';
+            document.body.appendChild(feedback);
+            
+            setTimeout(() => {
+                feedback.style.opacity = '0';
+                setTimeout(() => feedback.remove(), 300);
+            }, 2000);
+            
+            // Recreate control panel to update buttons
+            if (controlPanel) controlPanel.remove();
+            createControlPanel();
         }
     };
 
@@ -180,19 +236,21 @@ if (typeof window.visualScraperLoaded === 'undefined') {
         if (!isRecording && !isEditingSelector) return;
         const target = e.target;
         if (target.closest('[id^="vs-"]')) {
-            highlightOverlay.style.display = 'none';
-            previewTooltip.style.display = 'none';
+            if (highlightOverlay) highlightOverlay.style.display = 'none';
+            if (previewTooltip) previewTooltip.style.display = 'none';
             return;
         }
 
         const rect = target.getBoundingClientRect();
-        Object.assign(highlightOverlay.style, {
-            display: 'block',
-            width: `${rect.width}px`,
-            height: `${rect.height}px`,
-            top: `${rect.top + window.scrollY}px`,
-            left: `${rect.left + window.scrollX}px`
-        });
+        if (highlightOverlay) {
+            Object.assign(highlightOverlay.style, {
+                display: 'block',
+                width: `${rect.width}px`,
+                height: `${rect.height}px`,
+                top: `${rect.top + window.scrollY}px`,
+                left: `${rect.left + window.scrollX}px`
+            });
+        }
 
         const textContent = target.innerText.trim();
         if (textContent && previewTooltip) {
@@ -228,7 +286,7 @@ if (typeof window.visualScraperLoaded === 'undefined') {
             defaultName
         );
 
-        if (dataName) {
+        if (dataName && dataName.trim()) {
             const selector = getCssSelector(target);
             if (isEditingSelector) {
                 currentSelections[editingSelectorIndex] = {
@@ -244,49 +302,64 @@ if (typeof window.visualScraperLoaded === 'undefined') {
                     preview: textPreview
                 });
                 updateSelectionCounter();
+                
+                // Show success indicator (no confirmation dialog)
+                const successIndicator = document.createElement('div');
+                successIndicator.style.cssText = `
+                    position: absolute;
+                    top: ${target.getBoundingClientRect().top + window.scrollY}px;
+                    left: ${target.getBoundingClientRect().left + window.scrollX}px;
+                    background: #10b981;
+                    color: #ffffff;
+                    padding: 4px 8px;
+                    border-radius: 4px;
+                    font-size: 12px;
+                    font-family: Inter, sans-serif;
+                    z-index: 1000002;
+                    pointer-events: none;
+                    transition: opacity 0.3s ease;
+                `;
+                successIndicator.textContent = `✓ ${dataName.trim()}`;
+                document.body.appendChild(successIndicator);
+
+                setTimeout(() => {
+                    successIndicator.style.opacity = '0';
+                    setTimeout(() => successIndicator.remove(), 300);
+                }, 2000);
+                
+                // Recreate control panel to update remove button
+                if (controlPanel) controlPanel.remove();
+                createControlPanel();
             }
-
-            const successIndicator = document.createElement('div');
-            successIndicator.style.cssText = `
-                position: absolute;
-                top: ${target.getBoundingClientRect().top + window.scrollY}px;
-                left: ${target.getBoundingClientRect().left + window.scrollX}px;
-                background: #10b981;
-                color: #ffffff;
-                padding: 4px 8px;
-                border-radius: 4px;
-                font-size: 12px;
-                font-family: Inter, sans-serif;
-                z-index: 1000002;
-                pointer-events: none;
-                transition: opacity 0.3s ease;
-            `;
-            successIndicator.textContent = `✓ ${dataName}`;
-            document.body.appendChild(successIndicator);
-
-            setTimeout(() => {
-                successIndicator.style.opacity = '0';
-                setTimeout(() => successIndicator.remove(), 300);
-            }, 2000);
         }
     };
 
     // --- Core Logic ---
     const stopAndSave = () => {
         if (currentSelections.length === 0) {
-            alert("No elements were selected. Click elements on the page to add them to your robot.");
-            return;
+            const createAnyway = confirm("No elements were selected. Would you like to save the robot anyway? You can add fields later by editing the robot.");
+            if (!createAnyway) {
+                return;
+            }
         }
 
-        const confirmMessage = `Save robot "${currentRobotName}" with ${currentSelections.length} selected fields?\n\nFields: ${currentSelections.map(s => s.name).join(', ')}`;
+        const fieldList = currentSelections.length > 0 ? 
+            `\n\nFields: ${currentSelections.map(s => s.name).join(', ')}` : 
+            '\n\nNo fields selected yet - you can add them later by editing the robot.';
+
+        const confirmMessage = `Save robot "${currentRobotName}" with ${currentSelections.length} selected fields?${fieldList}`;
 
         if (confirm(confirmMessage)) {
             chrome.storage.local.get({ robots: {} }, (result) => {
                 const robots = result.robots;
                 robots[currentRobotName] = currentSelections.map(({ name, selector }) => ({ name, selector }));
                 chrome.storage.local.set({ robots }, () => {
-                    alert(`Robot "${currentRobotName}" saved successfully with ${currentSelections.length} fields!`);
-                    chrome.runtime.sendMessage({ action: 'robotSaved', robotName: currentRobotName });
+                    alert(`✅ Robot "${currentRobotName}" saved successfully with ${currentSelections.length} fields!`);
+                    chrome.runtime.sendMessage({ 
+                        action: 'robotSaved', 
+                        robotName: currentRobotName,
+                        fieldCount: currentSelections.length 
+                    });
                     stopRecording();
                 });
             });
@@ -294,16 +367,24 @@ if (typeof window.visualScraperLoaded === 'undefined') {
     };
 
     const saveEditedSelector = () => {
+        if (currentSelections.length === 0) {
+            alert("No selector was updated. Please click an element to update the selector.");
+            return;
+        }
+
         chrome.storage.local.get({ robots: {} }, (result) => {
             const robots = result.robots;
             if (robots[currentRobotName]) {
                 robots[currentRobotName][editingSelectorIndex] = {
-                    name: currentSelections[editingSelectorIndex].name,
-                    selector: currentSelections[editingSelectorIndex].selector
+                    name: currentSelections[0].name,
+                    selector: currentSelections[0].selector
                 };
                 chrome.storage.local.set({ robots }, () => {
-                    alert(`Selector "${currentSelections[editingSelectorIndex].name}" updated successfully!`);
-                    chrome.runtime.sendMessage({ action: 'selectorEdited', robotName: currentRobotName });
+                    alert(`✅ Selector "${currentSelections[0].name}" updated successfully!`);
+                    chrome.runtime.sendMessage({ 
+                        action: 'selectorEdited', 
+                        robotName: currentRobotName 
+                    });
                     stopRecording();
                 });
             }
@@ -334,11 +415,16 @@ if (typeof window.visualScraperLoaded === 'undefined') {
         return path.join(' > ');
     };
 
-    const startRecording = (robotName) => {
-        isRecording = true;
-        isEditingSelector = false;
+    const startRecording = (robotName, editMode = false, selectorIndex = -1, selectorName = '') => {
+        isRecording = !editMode;
+        isEditingSelector = editMode;
         currentRobotName = robotName;
-        currentSelections = [];
+        currentSelections = editMode ? [] : [];
+        
+        if (editMode) {
+            editingSelectorIndex = selectorIndex;
+            editingSelectorName = selectorName;
+        }
 
         createHighlightOverlay();
         createPreviewTooltip();
@@ -351,30 +437,12 @@ if (typeof window.visualScraperLoaded === 'undefined') {
         document.addEventListener('mouseout', handleMouseOut, true);
         document.addEventListener('click', handleClick, true);
 
-        setTimeout(() => {
-            alert(`Recording started for "${robotName}"!\n\nInstructions:\n• Hover over elements to preview\n• Click elements to select data fields\n• Use the control panel to finish or cancel`);
-        }, 500);
-    };
-
-    const startSelectorEdit = (robotName, selectorIndex, selectorName) => {
-        isRecording = false;
-        isEditingSelector = true;
-        currentRobotName = robotName;
-        editingSelectorIndex = selectorIndex;
-        editingSelectorName = selectorName;
-        currentSelections = [{ name: selectorName, selector: '', preview: '' }]; // Temporary for editing
-
-        createHighlightOverlay();
-        createPreviewTooltip();
-        createSelectionCounter();
-        createControlPanel();
-
-        document.addEventListener('mouseover', handleMouseOver, true);
-        document.addEventListener('mouseout', handleMouseOut, true);
-        document.addEventListener('click', handleClick, true);
+        const message = editMode ? 
+            `Editing selector "${selectorName}" for "${robotName}"!\n\nClick an element to update this field.` :
+            `Recording started for "${robotName}"!\n\nInstructions:\n• Click elements to select data fields\n• Use "Remove Last" if you make a mistake\n• Click "Finish & Save Robot" when done`;
 
         setTimeout(() => {
-            alert(`Editing selector "${selectorName}" for "${robotName}"!\n\nInstructions:\n• Hover over an element to preview\n• Click to select a new element for this field\n• Use the control panel to save or cancel`);
+            alert(message);
         }, 500);
     };
 
@@ -436,7 +504,10 @@ if (typeof window.visualScraperLoaded === 'undefined') {
         } else if (request.action === 'runExtraction') {
             extractData(request.selectors, request.robotName, request.requestId);
         } else if (request.action === 'editSelector') {
-            startSelectorEdit(request.robotName, request.selectorIndex, request.selectorName);
+            startRecording(request.robotName, true, request.selectorIndex, request.selectorName);
+        } else if (request.action === 'editRobot') {
+            // Start recording mode for editing entire robot
+            startRecording(request.robotName);
         }
         sendResponse({ status: "received" });
         return true;
