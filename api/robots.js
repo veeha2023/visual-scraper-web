@@ -1,16 +1,4 @@
-import { createClient } from 'redis';
-
-const redisClient = createClient({
-  url: process.env.REDIS_URL
-});
-
-// Helper function to ensure connection is open, wrapping the original connection
-async function ensureRedisConnection() {
-  if (!redisClient.isOpen) {
-    // This connection attempt must be inside the handler's try/catch for robust error handling
-    await redisClient.connect();
-  }
-}
+import { supabase } from '../lib/supabase.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -22,22 +10,24 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Ensure connection is established. If this fails, the catch block will run and return JSON.
-    await ensureRedisConnection();
-
     if (req.method === 'GET') {
-      let robots = await redisClient.get('robots');
-      if (!robots) {
-        robots = {};
-        await redisClient.set('robots', JSON.stringify(robots));
-      } else {
-        robots = JSON.parse(robots);
-      }
-      
+      const { data, error } = await supabase
+        .from('robots')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Convert to the format expected by frontend: { robotName: selectors }
+      const robotsObject = {};
+      data.forEach(robot => {
+        robotsObject[robot.name] = robot.selectors;
+      });
+
       res.status(200).json({ 
         success: true,
-        count: Object.keys(robots).length,
-        robots: robots
+        count: data.length,
+        robots: robotsObject
       });
     } 
     else if (req.method === 'POST') {
@@ -47,20 +37,25 @@ export default async function handler(req, res) {
         return res.status(400).json({ success: false, error: 'Robot name and selectors required' });
       }
 
-      let robots = await redisClient.get('robots');
-      if (!robots) {
-        robots = {};
-      } else {
-        robots = JSON.parse(robots);
-      }
-      
-      // Check if robot exists (POST is used for creation)
-      if (robots[robotName]) {
+      // Check if robot already exists
+      const { data: existing } = await supabase
+        .from('robots')
+        .select('id')
+        .eq('name', robotName)
+        .single();
+
+      if (existing) {
         return res.status(409).json({ success: false, error: 'Robot already exists. Use PUT to update.' });
       }
-      
-      robots[robotName] = selectors;
-      await redisClient.set('robots', JSON.stringify(robots));
+
+      const { data, error } = await supabase
+        .from('robots')
+        .insert([
+          { name: robotName, selectors: selectors }
+        ])
+        .select();
+
+      if (error) throw error;
 
       res.status(201).json({ 
         success: true,
@@ -74,22 +69,20 @@ export default async function handler(req, res) {
         return res.status(400).json({ success: false, error: 'Robot name and selectors required' });
       }
 
-      let robots = await redisClient.get('robots');
-      if (!robots) {
-        robots = {};
-      } else {
-        robots = JSON.parse(robots);
-      }
-      
-      if (!robots[robotName]) {
+      const { data, error } = await supabase
+        .from('robots')
+        .update({ selectors: selectors, updated_at: new Date().toISOString() })
+        .eq('name', robotName)
+        .select();
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
         return res.status(404).json({ 
           success: false, 
           error: 'Robot not found' 
         });
       }
-
-      robots[robotName] = selectors;
-      await redisClient.set('robots', JSON.stringify(robots));
 
       res.status(200).json({ 
         success: true,
@@ -103,31 +96,29 @@ export default async function handler(req, res) {
         return res.status(400).json({ success: false, error: 'Robot name required' });
       }
 
-      let robots = await redisClient.get('robots');
-      if (!robots) {
-        robots = {};
-      } else {
-        robots = JSON.parse(robots);
-      }
-      
-      if (robots[robotName]) {
-        delete robots[robotName];
-        await redisClient.set('robots', JSON.stringify(robots));
-        res.status(200).json({ 
-          success: true,
-          message: `Robot "${robotName}" deleted successfully`
-        });
-      } else {
-        res.status(404).json({ 
+      const { data, error } = await supabase
+        .from('robots')
+        .delete()
+        .eq('name', robotName)
+        .select();
+
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
+        return res.status(404).json({ 
           success: false,
           error: 'Robot not found'
         });
       }
+
+      res.status(200).json({ 
+        success: true,
+        message: `Robot "${robotName}" deleted successfully`
+      });
     } else {
       res.status(405).json({ success: false, error: 'Method not allowed' });
     }
   } catch (error) {
-    // If connection fails, this catch block ensures a JSON 500 error is returned.
     console.error('Robots API error:', error);
     res.status(500).json({ 
       success: false, 

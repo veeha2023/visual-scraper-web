@@ -1,16 +1,4 @@
-import { createClient } from 'redis';
-
-const redisClient = createClient({
-  url: process.env.REDIS_URL
-});
-
-// Helper function to ensure connection is open, wrapping the original connection
-async function ensureRedisConnection() {
-  if (!redisClient.isOpen) {
-    // This connection attempt must be inside the handler's try/catch for robust error handling
-    await redisClient.connect();
-  }
-}
+import { supabase } from '../lib/supabase.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -26,9 +14,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Ensure connection is established. If this fails, the catch block will run and return JSON.
-    await ensureRedisConnection();
-    
     const { urls, robotName, workspace = 'general' } = req.body;
 
     if (!urls || !robotName) {
@@ -51,18 +36,19 @@ export default async function handler(req, res) {
     const limitedUrls = urlArray.slice(0, 50);
 
     // Get robot configuration
-    let robots = await redisClient.get('robots');
-    if (!robots) {
-      return res.status(404).json({ success: false, error: 'No robots configured' });
-    }
-    robots = JSON.parse(robots);
-    
-    const robotConfig = robots[robotName];
-    if (!robotConfig) {
+    const { data: robotData, error: robotError } = await supabase
+      .from('robots')
+      .select('selectors')
+      .eq('name', robotName)
+      .single();
+
+    if (robotError || !robotData) {
       return res.status(404).json({ success: false, error: `Robot "${robotName}" not found` });
     }
 
+    const robotConfig = robotData.selectors;
     const results = [];
+    const dataToInsert = [];
 
     // Simulate bulk scraping process (since actual scraping requires a browser environment)
     for (const url of limitedUrls) {
@@ -71,37 +57,23 @@ export default async function handler(req, res) {
         const mockData = {};
         
         robotConfig.forEach(field => {
-          // Simple mock extraction for all types
           mockData[field.name] = `[MOCK] ${field.name} for ${url}`;
         });
 
-        // Save to workspace
-        let workspaceData = await redisClient.get('workspace_data');
-        if (!workspaceData) {
-          workspaceData = {};
-        } else {
-          workspaceData = JSON.parse(workspaceData);
-        }
-
-        if (!workspaceData[workspace]) {
-          workspaceData[workspace] = [];
-        }
-
         const newEntry = {
-          ...mockData,
-          timestamp: new Date().toISOString(),
-          bulkJob: true,
-          robotName: robotName,
-          sourceUrl: url // Add source URL for context
+          workspace_id: workspace,
+          robot_name: robotName,
+          data: mockData,
+          source_url: url,
+          bulk_job: true
         };
         
-        workspaceData[workspace].push(newEntry);
-        await redisClient.set('workspace_data', JSON.stringify(workspaceData));
+        dataToInsert.push(newEntry);
 
         results.push({ 
           url, 
           success: true, 
-          data: newEntry 
+          data: mockData 
         });
         
       } catch (error) {
@@ -111,6 +83,15 @@ export default async function handler(req, res) {
           error: error.message 
         });
       }
+    }
+
+    // Bulk insert all data at once
+    if (dataToInsert.length > 0) {
+      const { error: insertError } = await supabase
+        .from('workspace_data')
+        .insert(dataToInsert);
+
+      if (insertError) throw insertError;
     }
 
     const successCount = results.filter(r => r.success).length;
@@ -130,7 +111,6 @@ export default async function handler(req, res) {
     });
     
   } catch (error) {
-    // If connection fails, this catch block ensures a JSON 500 error is returned.
     console.error('Bulk processing error:', error);
     res.status(500).json({ 
       success: false, 

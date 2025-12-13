@@ -1,16 +1,4 @@
-import { createClient } from 'redis';
-
-const redisClient = createClient({
-  url: process.env.REDIS_URL
-});
-
-// Helper function to ensure connection is open, wrapping the original connection
-async function ensureRedisConnection() {
-  if (!redisClient.isOpen) {
-    // This connection attempt must be inside the handler's try/catch for robust error handling
-    await redisClient.connect();
-  }
-}
+import { supabase } from '../lib/supabase.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -26,9 +14,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Ensure connection is established. If this fails, the catch block will run and return JSON.
-    await ensureRedisConnection();
-
     const { robotName, selectors, data, workspace = 'general' } = req.body;
 
     if (!robotName) {
@@ -40,39 +25,44 @@ export default async function handler(req, res) {
 
     // Save robot (shared across all workspaces)
     if (selectors) {
-      let robots = await redisClient.get('robots');
-      if (!robots) {
-        robots = {};
+      // Check if robot exists
+      const { data: existingRobot } = await supabase
+        .from('robots')
+        .select('id')
+        .eq('name', robotName)
+        .single();
+
+      if (existingRobot) {
+        // Update existing robot
+        const { error } = await supabase
+          .from('robots')
+          .update({ selectors: selectors, updated_at: new Date().toISOString() })
+          .eq('name', robotName);
+
+        if (error) throw error;
       } else {
-        robots = JSON.parse(robots);
+        // Create new robot
+        const { error } = await supabase
+          .from('robots')
+          .insert([{ name: robotName, selectors: selectors }]);
+
+        if (error) throw error;
       }
-      
-      robots[robotName] = selectors;
-      await redisClient.set('robots', JSON.stringify(robots));
     }
 
     // Save data to specific workspace
     if (data) {
-      let workspaceData = await redisClient.get('workspace_data');
-      if (!workspaceData) {
-        workspaceData = {};
-      } else {
-        workspaceData = JSON.parse(workspaceData);
-      }
+      const { error } = await supabase
+        .from('workspace_data')
+        .insert([{
+          workspace_id: workspace,
+          robot_name: robotName,
+          data: data,
+          source_url: data['Source URL'] || data.sourceUrl || null,
+          bulk_job: data.bulkJob || false
+        }]);
 
-      if (!workspaceData[workspace]) {
-        workspaceData[workspace] = [];
-      }
-
-      const newEntry = {
-        ...data,
-        robotName,
-        workspace: workspace,
-        timestamp: new Date().toISOString()
-      };
-      
-      workspaceData[workspace].push(newEntry);
-      await redisClient.set('workspace_data', JSON.stringify(workspaceData));
+      if (error) throw error;
     }
 
     res.status(200).json({ 
@@ -83,7 +73,6 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    // If connection fails, this catch block ensures a JSON 500 error is returned.
     console.error('Save API error:', error);
     res.status(500).json({ 
       success: false, 

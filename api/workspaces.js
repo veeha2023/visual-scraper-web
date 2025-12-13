@@ -1,16 +1,4 @@
-import { createClient } from 'redis';
-
-const redisClient = createClient({
-  url: process.env.REDIS_URL
-});
-
-// Helper function to ensure connection is open, wrapping the original connection
-async function ensureRedisConnection() {
-  if (!redisClient.isOpen) {
-    // This connection attempt must be inside the handler's try/catch for robust error handling
-    await redisClient.connect();
-  }
-}
+import { supabase } from '../lib/supabase.js';
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -22,35 +10,21 @@ export default async function handler(req, res) {
   }
 
   try {
-    // Ensure connection is established. If this fails, the catch block will run and return JSON.
-    await ensureRedisConnection();
-
     if (req.method === 'GET') {
-      // Get all workspaces
-      let workspaces = await redisClient.get('workspaces');
-      if (!workspaces) {
-        // Initialize with default workspace
-        workspaces = {
-          'general': 'General (Testing)'
-        };
-        await redisClient.set('workspaces', JSON.stringify(workspaces));
-      } else {
-        workspaces = JSON.parse(workspaces);
-      }
+      const { data, error } = await supabase
+        .from('workspaces')
+        .select('*')
+        .order('created_at', { ascending: true });
 
-      // Convert to array for frontend
-      const workspacesArray = Object.entries(workspaces).map(([id, name]) => ({
-        id, name
-      }));
+      if (error) throw error;
 
       res.status(200).json({
         success: true,
-        workspaces: workspacesArray,
-        count: workspacesArray.length
+        workspaces: data,
+        count: data.length
       });
 
     } else if (req.method === 'POST') {
-      // Create new workspace
       const { workspaceId, workspaceName } = req.body;
 
       if (!workspaceId || !workspaceName) {
@@ -60,7 +34,6 @@ export default async function handler(req, res) {
         });
       }
       
-      // Basic validation
       if (workspaceId.toLowerCase() === 'general') {
         return res.status(400).json({
           success: false,
@@ -68,48 +41,36 @@ export default async function handler(req, res) {
         });
       }
 
-      let workspaces = await redisClient.get('workspaces');
-      if (!workspaces) {
-        workspaces = {
-          'general': 'General (Testing)'
-        };
-      } else {
-        workspaces = JSON.parse(workspaces);
-      }
-
       // Check if workspace already exists
-      if (workspaces[workspaceId]) {
+      const { data: existing } = await supabase
+        .from('workspaces')
+        .select('id')
+        .eq('id', workspaceId)
+        .single();
+
+      if (existing) {
         return res.status(400).json({
           success: false,
           error: 'Workspace ID already exists'
         });
       }
 
-      // Add new workspace
-      workspaces[workspaceId] = workspaceName;
-      await redisClient.set('workspaces', JSON.stringify(workspaces));
+      const { data, error } = await supabase
+        .from('workspaces')
+        .insert([
+          { id: workspaceId, name: workspaceName }
+        ])
+        .select();
 
-      // Initialize empty data for new workspace
-      let workspaceData = await redisClient.get('workspace_data');
-      if (!workspaceData) {
-        workspaceData = {};
-      } else {
-        workspaceData = JSON.parse(workspaceData);
-      }
-
-      if (!workspaceData[workspaceId]) {
-        workspaceData[workspaceId] = [];
-        await redisClient.set('workspace_data', JSON.stringify(workspaceData));
-      }
+      if (error) throw error;
 
       res.status(200).json({
         success: true,
         message: `Workspace "${workspaceName}" created successfully`,
-        workspace: { id: workspaceId, name: workspaceName }
+        workspace: data[0]
       });
 
     } else if (req.method === 'DELETE') {
-      // Delete workspace
       const { workspaceId } = req.query;
 
       if (!workspaceId) {
@@ -118,6 +79,7 @@ export default async function handler(req, res) {
           error: 'Workspace ID is required for deletion'
         });
       }
+      
       if (workspaceId.toLowerCase() === 'general') {
         return res.status(403).json({
           success: false,
@@ -125,29 +87,19 @@ export default async function handler(req, res) {
         });
       }
 
-      let workspaces = await redisClient.get('workspaces');
-      if (!workspaces) {
-        workspaces = {};
-      } else {
-        workspaces = JSON.parse(workspaces);
-      }
+      const { data, error } = await supabase
+        .from('workspaces')
+        .delete()
+        .eq('id', workspaceId)
+        .select();
 
-      if (!workspaces[workspaceId]) {
+      if (error) throw error;
+
+      if (!data || data.length === 0) {
         return res.status(404).json({
           success: false,
           error: 'Workspace not found'
         });
-      }
-
-      // Delete workspace and its data
-      delete workspaces[workspaceId];
-      await redisClient.set('workspaces', JSON.stringify(workspaces));
-
-      let workspaceData = await redisClient.get('workspace_data');
-      if (workspaceData) {
-        workspaceData = JSON.parse(workspaceData);
-        delete workspaceData[workspaceId];
-        await redisClient.set('workspace_data', JSON.stringify(workspaceData));
       }
 
       res.status(200).json({
@@ -159,7 +111,6 @@ export default async function handler(req, res) {
       res.status(405).json({ success: false, error: 'Method not allowed' });
     }
   } catch (error) {
-    // If connection fails, this catch block ensures a JSON 500 error is returned.
     console.error('Workspaces API error:', error);
     res.status(500).json({
       success: false,
