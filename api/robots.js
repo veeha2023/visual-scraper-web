@@ -4,8 +4,13 @@ const redisClient = createClient({
   url: process.env.REDIS_URL
 });
 
-// Connect to Redis
-await redisClient.connect();
+// Helper function to ensure connection is open, wrapping the original connection
+async function ensureRedisConnection() {
+  if (!redisClient.isOpen) {
+    // This connection attempt must be inside the handler's try/catch for robust error handling
+    await redisClient.connect();
+  }
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -17,6 +22,9 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Ensure connection is established. If this fails, the catch block will run and return JSON.
+    await ensureRedisConnection();
+
     if (req.method === 'GET') {
       let robots = await redisClient.get('robots');
       if (!robots) {
@@ -46,26 +54,22 @@ export default async function handler(req, res) {
         robots = JSON.parse(robots);
       }
       
-      // Check if robot already exists
+      // Check if robot exists (POST is used for creation)
       if (robots[robotName]) {
-        return res.status(400).json({ 
-          success: false, 
-          error: 'Robot with this name already exists' 
-        });
+        return res.status(409).json({ success: false, error: 'Robot already exists. Use PUT to update.' });
       }
-
+      
       robots[robotName] = selectors;
       await redisClient.set('robots', JSON.stringify(robots));
-      
-      res.status(200).json({ 
+
+      res.status(201).json({ 
         success: true,
-        message: `Robot "${robotName}" created successfully`,
-        robotName: robotName
+        message: `Robot "${robotName}" created successfully`
       });
     }
     else if (req.method === 'PUT') {
       const { robotName, selectors } = req.body;
-      
+
       if (!robotName || !selectors) {
         return res.status(400).json({ success: false, error: 'Robot name and selectors required' });
       }
@@ -123,10 +127,12 @@ export default async function handler(req, res) {
       res.status(405).json({ success: false, error: 'Method not allowed' });
     }
   } catch (error) {
+    // If connection fails, this catch block ensures a JSON 500 error is returned.
     console.error('Robots API error:', error);
     res.status(500).json({ 
       success: false, 
-      error: error.message
+      error: 'A server error has occurred. Details: ' + error.message,
+      internalError: error.message
     });
   }
 }

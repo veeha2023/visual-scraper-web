@@ -4,7 +4,13 @@ const redisClient = createClient({
   url: process.env.REDIS_URL
 });
 
-await redisClient.connect();
+// Helper function to ensure connection is open, wrapping the original connection
+async function ensureRedisConnection() {
+  if (!redisClient.isOpen) {
+    // This connection attempt must be inside the handler's try/catch for robust error handling
+    await redisClient.connect();
+  }
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -20,6 +26,9 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Ensure connection is established. If this fails, the catch block will run and return JSON.
+    await ensureRedisConnection();
+    
     const { urls, robotName, workspace = 'general' } = req.body;
 
     if (!urls || !robotName) {
@@ -44,40 +53,26 @@ export default async function handler(req, res) {
     // Get robot configuration
     let robots = await redisClient.get('robots');
     if (!robots) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'No robots found' 
-      });
+      return res.status(404).json({ success: false, error: 'No robots configured' });
     }
-    
     robots = JSON.parse(robots);
-    const robotConfig = robots[robotName];
     
+    const robotConfig = robots[robotName];
     if (!robotConfig) {
-      return res.status(404).json({ 
-        success: false, 
-        error: `Robot "${robotName}" not found` 
-      });
+      return res.status(404).json({ success: false, error: `Robot "${robotName}" not found` });
     }
 
     const results = [];
-    
-    // Process URLs (this would need actual scraping service)
+
+    // Simulate bulk scraping process (since actual scraping requires a browser environment)
     for (const url of limitedUrls) {
       try {
-        // Simulate scraping - in real implementation, you'd use a headless browser
-        const mockData = {
-          'Source URL': url,
-          'Scraped At': new Date().toLocaleString(),
-          'robotName': robotName,
-          'workspace': workspace,
-          'Title': `Mock title for ${url}`,
-          'Status': 'Processed via bulk API'
-        };
-
-        // Add robot fields with mock data
+        // Mock data creation based on robot selectors
+        const mockData = {};
+        
         robotConfig.forEach(field => {
-          mockData[field.name] = `Mock ${field.name} for ${url}`;
+          // Simple mock extraction for all types
+          mockData[field.name] = `[MOCK] ${field.name} for ${url}`;
         });
 
         // Save to workspace
@@ -95,7 +90,9 @@ export default async function handler(req, res) {
         const newEntry = {
           ...mockData,
           timestamp: new Date().toISOString(),
-          bulkJob: true
+          bulkJob: true,
+          robotName: robotName,
+          sourceUrl: url // Add source URL for context
         };
         
         workspaceData[workspace].push(newEntry);
@@ -133,10 +130,12 @@ export default async function handler(req, res) {
     });
     
   } catch (error) {
+    // If connection fails, this catch block ensures a JSON 500 error is returned.
     console.error('Bulk processing error:', error);
     res.status(500).json({ 
       success: false, 
-      error: error.message 
+      error: 'A server error has occurred. Details: ' + error.message,
+      internalError: error.message
     });
   }
 }

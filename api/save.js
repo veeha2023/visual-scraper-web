@@ -4,7 +4,13 @@ const redisClient = createClient({
   url: process.env.REDIS_URL
 });
 
-await redisClient.connect();
+// Helper function to ensure connection is open, wrapping the original connection
+async function ensureRedisConnection() {
+  if (!redisClient.isOpen) {
+    // This connection attempt must be inside the handler's try/catch for robust error handling
+    await redisClient.connect();
+  }
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -20,6 +26,9 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Ensure connection is established. If this fails, the catch block will run and return JSON.
+    await ensureRedisConnection();
+
     const { robotName, selectors, data, workspace = 'general' } = req.body;
 
     if (!robotName) {
@@ -74,10 +83,12 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error('Save error:', error);
+    // If connection fails, this catch block ensures a JSON 500 error is returned.
+    console.error('Save API error:', error);
     res.status(500).json({ 
       success: false, 
-      error: error.message
+      error: 'A server error has occurred. Details: ' + error.message,
+      internalError: error.message
     });
   }
 }

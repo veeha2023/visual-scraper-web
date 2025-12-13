@@ -4,7 +4,13 @@ const redisClient = createClient({
   url: process.env.REDIS_URL
 });
 
-await redisClient.connect();
+// Helper function to ensure connection is open, wrapping the original connection
+async function ensureRedisConnection() {
+  if (!redisClient.isOpen) {
+    // This connection attempt must be inside the handler's try/catch for robust error handling
+    await redisClient.connect();
+  }
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -16,6 +22,9 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Ensure connection is established. If this fails, the catch block will run and return JSON.
+    await ensureRedisConnection();
+    
     if (req.method === 'GET') {
       // Get all webhooks or a specific one
       const { workspace, webhookId } = req.query;
@@ -46,185 +55,81 @@ export default async function handler(req, res) {
         // Return webhooks for specific workspace
         const workspaceWebhooks = Object.entries(webhooks)
           .filter(([id, wh]) => wh.workspace === workspace)
-          .reduce((acc, [id, wh]) => {
-            acc[id] = wh;
-            return acc;
-          }, {});
+          .map(([id, wh]) => ({ ...wh, id }));
 
         res.status(200).json({
           success: true,
           webhooks: workspaceWebhooks,
-          count: Object.keys(workspaceWebhooks).length
+          count: workspaceWebhooks.length
         });
       } else {
         // Return all webhooks
+        const allWebhooks = Object.entries(webhooks).map(([id, wh]) => ({ ...wh, id }));
+
         res.status(200).json({
           success: true,
-          webhooks: webhooks,
-          count: Object.keys(webhooks).length
+          webhooks: allWebhooks,
+          count: allWebhooks.length
         });
       }
-
+      
     } else if (req.method === 'POST') {
-      // Create or trigger a webhook
-      const { action, webhookId, workspace, robotName, urls, webhookUrl, secret } = req.body;
-
-      if (action === 'create') {
-        // Create new webhook
-        if (!webhookId || !workspace || !robotName || !webhookUrl) {
-          return res.status(400).json({
-            success: false,
-            error: 'Missing required fields: webhookId, workspace, robotName, webhookUrl'
-          });
-        }
-
-        let webhooks = await redisClient.get('webhooks');
-        if (!webhooks) {
-          webhooks = {};
-        } else {
-          webhooks = JSON.parse(webhooks);
-        }
-
-        // Check if webhook already exists
-        if (webhooks[webhookId]) {
-          return res.status(400).json({
-            success: false,
-            error: 'Webhook ID already exists'
-          });
-        }
-
-        // Create webhook
-        webhooks[webhookId] = {
-          id: webhookId,
-          workspace: workspace,
-          robotName: robotName,
-          webhookUrl: webhookUrl,
-          secret: secret || '',
-          createdAt: new Date().toISOString(),
-          lastTriggered: null,
-          triggerCount: 0
-        };
-
-        await redisClient.set('webhooks', JSON.stringify(webhooks));
-
-        res.status(200).json({
-          success: true,
-          message: 'Webhook created successfully',
-          webhook: webhooks[webhookId]
-        });
-
-      } else if (action === 'trigger') {
-        // Trigger webhook to scrape URLs
-        if (!webhookId || !urls) {
-          return res.status(400).json({
-            success: false,
-            error: 'Missing required fields: webhookId, urls'
-          });
-        }
-
-        let webhooks = await redisClient.get('webhooks');
-        if (!webhooks) {
-          return res.status(404).json({
-            success: false,
-            error: 'Webhook not found'
-          });
-        } else {
-          webhooks = JSON.parse(webhooks);
-        }
-
-        const webhook = webhooks[webhookId];
-        if (!webhook) {
-          return res.status(404).json({
-            success: false,
-            error: 'Webhook not found'
-          });
-        }
-
-        // Validate URLs
-        const urlList = Array.isArray(urls) ? urls : [urls];
-        const validUrls = urlList.filter(url => 
-          url && (url.startsWith('http://') || url.startsWith('https://'))
-        );
-
-        if (validUrls.length === 0) {
-          return res.status(400).json({
-            success: false,
-            error: 'No valid URLs provided'
-          });
-        }
-
-        // Get robot configuration
-        let robots = await redisClient.get('robots');
-        if (!robots) {
-          return res.status(400).json({
-            success: false,
-            error: 'Robot not found'
-          });
-        } else {
-          robots = JSON.parse(robots);
-        }
-
-        const robot = robots[webhook.robotName];
-        if (!robot) {
-          return res.status(400).json({
-            success: false,
-            error: `Robot "${webhook.robotName}" not found`
-          });
-        }
-
-        // Update webhook stats
-        webhook.lastTriggered = new Date().toISOString();
-        webhook.triggerCount = (webhook.triggerCount || 0) + 1;
-        webhooks[webhookId] = webhook;
-        await redisClient.set('webhooks', JSON.stringify(webhooks));
-
-        // Return immediate response (async processing)
-        res.status(200).json({
-          success: true,
-          message: 'Webhook triggered successfully',
-          webhookId: webhookId,
-          urlsReceived: validUrls.length,
-          processing: 'Webhook processing started asynchronously'
-        });
-
-        // Process URLs asynchronously (this happens after response)
-        processWebhookUrls(webhook, robot, validUrls);
-
-      } else {
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid action. Use "create" or "trigger"'
-        });
+      // Create a new webhook
+      const { name, robotName, workspace, webhookUrl, secret, isActive = true } = req.body;
+      
+      if (!name || !robotName || !workspace) {
+        return res.status(400).json({ success: false, error: 'Name, robot, and workspace are required' });
       }
-
+      
+      let webhooks = await redisClient.get('webhooks');
+      if (!webhooks) {
+        webhooks = {};
+      } else {
+        webhooks = JSON.parse(webhooks);
+      }
+      
+      const newWebhookId = `wh_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+      
+      const newWebhook = {
+        name,
+        robotName,
+        workspace,
+        webhookUrl: webhookUrl || '',
+        secret: secret || '',
+        isActive: isActive,
+        createdAt: new Date().toISOString()
+      };
+      
+      webhooks[newWebhookId] = newWebhook;
+      await redisClient.set('webhooks', JSON.stringify(webhooks));
+      
+      res.status(201).json({
+        success: true,
+        message: 'Webhook created successfully',
+        webhook: { id: newWebhookId, ...newWebhook }
+      });
+      
     } else if (req.method === 'DELETE') {
-      // Delete webhook
+      // Delete a webhook
       const { webhookId } = req.body;
 
       if (!webhookId) {
-        return res.status(400).json({
-          success: false,
-          error: 'Webhook ID required'
-        });
+        return res.status(400).json({ success: false, error: 'Webhook ID is required' });
       }
 
       let webhooks = await redisClient.get('webhooks');
       if (!webhooks) {
-        return res.status(404).json({
-          success: false,
-          error: 'Webhook not found'
-        });
+        webhooks = {};
       } else {
         webhooks = JSON.parse(webhooks);
       }
-
+      
       if (webhooks[webhookId]) {
         delete webhooks[webhookId];
         await redisClient.set('webhooks', JSON.stringify(webhooks));
-        
         res.status(200).json({
           success: true,
-          message: 'Webhook deleted successfully'
+          message: `Webhook "${webhookId}" deleted successfully`
         });
       } else {
         res.status(404).json({
@@ -232,64 +137,65 @@ export default async function handler(req, res) {
           error: 'Webhook not found'
         });
       }
-
     } else {
       res.status(405).json({ success: false, error: 'Method not allowed' });
     }
   } catch (error) {
+    // If connection fails, this catch block ensures a JSON 500 error is returned.
     console.error('Webhooks API error:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'A server error has occurred. Details: ' + error.message,
+      internalError: error.message
     });
   }
 }
 
-// Async function to process webhook URLs
-async function processWebhookUrls(webhook, robot, urls) {
-  console.log(`Processing ${urls.length} URLs for webhook ${webhook.id}`);
+// Function to process a bulk job using a webhook (not directly exposed as an API endpoint)
+// This function is kept for internal logic but is not the main API handler
+async function processWebhookJob(webhook, urls) {
+  // This function simulates processing a webhook job
+  await ensureRedisConnection(); // Ensure connection is established here as well
+  
+  console.log(`Processing webhook job ${webhook.id} for robot ${webhook.robotName} on ${urls.length} URLs...`);
+  
+  // Get robot configuration (mock retrieval)
+  let robots = await redisClient.get('robots');
+  robots = robots ? JSON.parse(robots) : {};
+  const robot = robots[webhook.robotName];
+  
+  if (!robot) {
+    console.error(`Robot not found for webhook ${webhook.id}`);
+    return;
+  }
   
   const results = [];
   
   for (const url of urls) {
     try {
-      // Simulate scraping (in real implementation, you'd use Puppeteer or similar)
-      const scrapedData = await simulateScraping(url, robot);
+      const data = await simulateScraping(url, robot);
+      results.push({ url, status: 'success', data });
       
-      // Save to workspace
-      const saveResponse = await fetch(`https://visual-scraper-web.vercel.app/api/save`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          robotName: webhook.robotName,
-          selectors: robot,
-          data: scrapedData,
-          workspace: webhook.workspace
-        })
-      });
-
-      if (saveResponse.ok) {
-        results.push({
-          url: url,
-          status: 'success',
-          data: scrapedData
-        });
-      } else {
-        results.push({
-          url: url,
-          status: 'error',
-          error: 'Failed to save data'
-        });
+      // Save data to workspace
+      let workspaceData = await redisClient.get('workspace_data');
+      workspaceData = workspaceData ? JSON.parse(workspaceData) : {};
+      if (!workspaceData[webhook.workspace]) {
+        workspaceData[webhook.workspace] = [];
       }
       
-      // Small delay between requests
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      workspaceData[webhook.workspace].push({ 
+        ...data, 
+        robotName: webhook.robotName,
+        workspace: webhook.workspace,
+        timestamp: new Date().toISOString()
+      });
+      await redisClient.set('workspace_data', JSON.stringify(workspaceData));
       
     } catch (error) {
-      results.push({
-        url: url,
-        status: 'error',
-        error: error.message
+      results.push({ 
+        url, 
+        status: 'error', 
+        message: error.message
       });
     }
   }
@@ -337,7 +243,7 @@ async function simulateScraping(url, robot) {
   
   // Add mock data for each selector
   robot.forEach(selector => {
-    data[selector.name] = `Mock data for ${selector.name} from ${url}`;
+    data[selector.name] = `[Mock Data] Value for ${selector.name} from ${url.substring(0, 30)}...`;
   });
   
   return data;

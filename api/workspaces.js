@@ -4,7 +4,13 @@ const redisClient = createClient({
   url: process.env.REDIS_URL
 });
 
-await redisClient.connect();
+// Helper function to ensure connection is open, wrapping the original connection
+async function ensureRedisConnection() {
+  if (!redisClient.isOpen) {
+    // This connection attempt must be inside the handler's try/catch for robust error handling
+    await redisClient.connect();
+  }
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -16,6 +22,9 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Ensure connection is established. If this fails, the catch block will run and return JSON.
+    await ensureRedisConnection();
+
     if (req.method === 'GET') {
       // Get all workspaces
       let workspaces = await redisClient.get('workspaces');
@@ -50,9 +59,9 @@ export default async function handler(req, res) {
           error: 'Workspace ID and name are required'
         });
       }
-
-      // Validate workspace ID
-      if (workspaceId === 'general') {
+      
+      // Basic validation
+      if (workspaceId.toLowerCase() === 'general') {
         return res.status(400).json({
           success: false,
           error: 'Workspace ID "general" is reserved'
@@ -99,14 +108,63 @@ export default async function handler(req, res) {
         workspace: { id: workspaceId, name: workspaceName }
       });
 
+    } else if (req.method === 'DELETE') {
+      // Delete workspace
+      const { workspaceId } = req.query;
+
+      if (!workspaceId) {
+        return res.status(400).json({
+          success: false,
+          error: 'Workspace ID is required for deletion'
+        });
+      }
+      if (workspaceId.toLowerCase() === 'general') {
+        return res.status(403).json({
+          success: false,
+          error: 'The "general" workspace cannot be deleted'
+        });
+      }
+
+      let workspaces = await redisClient.get('workspaces');
+      if (!workspaces) {
+        workspaces = {};
+      } else {
+        workspaces = JSON.parse(workspaces);
+      }
+
+      if (!workspaces[workspaceId]) {
+        return res.status(404).json({
+          success: false,
+          error: 'Workspace not found'
+        });
+      }
+
+      // Delete workspace and its data
+      delete workspaces[workspaceId];
+      await redisClient.set('workspaces', JSON.stringify(workspaces));
+
+      let workspaceData = await redisClient.get('workspace_data');
+      if (workspaceData) {
+        workspaceData = JSON.parse(workspaceData);
+        delete workspaceData[workspaceId];
+        await redisClient.set('workspace_data', JSON.stringify(workspaceData));
+      }
+
+      res.status(200).json({
+        success: true,
+        message: `Workspace "${workspaceId}" deleted successfully`
+      });
+
     } else {
       res.status(405).json({ success: false, error: 'Method not allowed' });
     }
   } catch (error) {
+    // If connection fails, this catch block ensures a JSON 500 error is returned.
     console.error('Workspaces API error:', error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: 'A server error has occurred. Details: ' + error.message,
+      internalError: error.message
     });
   }
 }

@@ -4,7 +4,13 @@ const redisClient = createClient({
   url: process.env.REDIS_URL
 });
 
-await redisClient.connect();
+// Helper function to ensure connection is open, wrapping the original connection
+async function ensureRedisConnection() {
+  if (!redisClient.isOpen) {
+    // This connection attempt must be inside the handler's try/catch for robust error handling
+    await redisClient.connect();
+  }
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -16,6 +22,9 @@ export default async function handler(req, res) {
   }
 
   try {
+    // Ensure connection is established. If this fails, the catch block will run and return JSON.
+    await ensureRedisConnection();
+
     const { workspace = 'general', robot: robotFilter, limit, offset, search } = req.query;
 
     if (req.method === 'GET') {
@@ -46,30 +55,21 @@ export default async function handler(req, res) {
       // Apply pagination
       const totalCount = data.length;
       const startIndex = parseInt(offset) || 0;
-      const endIndex = limit ? startIndex + parseInt(limit) : data.length;
-      const paginatedData = data.slice(startIndex, endIndex);
-      
+      const parsedLimit = parseInt(limit) || 100;
+      const paginatedData = data.slice(startIndex, startIndex + parsedLimit);
+
       res.status(200).json({ 
-        success: true,
-        count: paginatedData.length,
-        totalCount: totalCount,
-        data: paginatedData,
+        success: true, 
         workspace: workspace,
-        hasMore: endIndex < totalCount,
-        filters: {
-          robot: robotFilter || null,
-          search: search || null,
-          limit: limit || null,
-          offset: offset || 0
-        },
-        lastUpdated: data.length > 0 ? data[data.length - 1].timestamp : null
+        data: paginatedData,
+        count: totalCount
       });
 
     } else if (req.method === 'DELETE') {
-      const { recordId } = req.query; // For deleting single record
+      const { recordId } = req.query;
       
       if (recordId) {
-        // Delete single record
+        // Delete a single record
         let workspaceData = await redisClient.get('workspace_data');
         if (!workspaceData) {
           workspaceData = {};
@@ -125,10 +125,12 @@ export default async function handler(req, res) {
       res.status(405).json({ success: false, error: 'Method not allowed' });
     }
   } catch (error) {
+    // If connection fails, this catch block ensures a JSON 500 error is returned.
     console.error('Data API error:', error);
     res.status(500).json({ 
       success: false, 
-      error: error.message
+      error: 'A server error has occurred. Details: ' + error.message,
+      internalError: error.message
     });
   }
 }
